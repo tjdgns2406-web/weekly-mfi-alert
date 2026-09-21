@@ -1,0 +1,30 @@
+name: Weekly MFI Alert Bot
+
+on:
+  schedule:
+    # UTC 기준 금요일 24:00 = 한국 시간(KST) 토요일 오전 09:00
+    - cron: '0 0 * * 6'
+  workflow_dispatch: # 수동 테스트용 버튼 생성
+
+jobs:
+  run-mfi-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install yfinance pandas requests
+
+      - name: Run MFI Script
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python main.py
