@@ -32,7 +32,7 @@ TICKERS = [
 HISTORY_FILE = "previous_mfi.json"
 
 # ----------------------------------------------------
-# 2. MFI(Money Flow Index) 안전 계산 함수
+# 2. MFI(Money Flow Index) 계산 함수
 # ----------------------------------------------------
 def calculate_mfi(df, period=14):
     try:
@@ -71,7 +71,7 @@ def calculate_mfi(df, period=14):
         return None
 
 # ----------------------------------------------------
-# 3. 지난주 데이터 로드 & 저장 함수
+# 3. 히스토리 데이터 로드 및 저장
 # ----------------------------------------------------
 def load_previous_data():
     if os.path.exists(HISTORY_FILE):
@@ -91,20 +91,19 @@ def save_current_data(under_40_tickers):
         pass
 
 # ----------------------------------------------------
-# 4. 텔레그램 메시지 전송 함수 (마크다운 에러 방지)
+# 4. 텔레그램 메시지 전송 (에러 상세 출력 적용)
 # ----------------------------------------------------
 def send_telegram_message(message):
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     
     if not bot_token or not chat_id:
-        print("[경고] TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID가 설정되지 않았습니다.")
-        print(message)
+        print("[ERROR] TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID 환경변수가 설정되지 않았습니다.")
         return
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     
-    # parse_mode를 제거하여 특수문자로 인한 전송 실패 방지
+    # parse_mode를 제거하여 마크다운 파싱 오류 전면 차단
     payload = {
         "chat_id": chat_id,
         "text": message
@@ -112,11 +111,18 @@ def send_telegram_message(message):
     
     try:
         res = requests.post(url, json=payload, timeout=10)
-        print(f"텔레그램 응답 코드: {res.status_code}")
+        print(f"텔레그램 응답 상태 코드: {res.status_code}")
+        
         if res.status_code != 200:
-            print(f"텔레그램 응답 상세: {res.text}")
+            print(f"[텔레그램 전송 실패 상세 이유]: {res.text}")
+            # 전송 실패 시 빌드도 에러로 처리하여 알 수 있게 함
+            raise Exception(f"Telegram API Error: {res.text}")
+        else:
+            print("텔레그램 메시지 전송 성공!")
+            
     except Exception as e:
-        print(f"텔레그램 전송 중 예외 발생: {e}")
+        print(f"[텔레그램 예외 발생]: {e}")
+        raise e
 
 # ----------------------------------------------------
 # 5. 메인 실행 로직
@@ -129,8 +135,8 @@ def main():
     
     current_all_under_40 = []
 
-    print("데이터 수집 시작...")
-    for idx, ticker in enumerate(TICKERS):
+    print("주가 및 MFI 데이터 분석 시작...")
+    for ticker in TICKERS:
         try:
             stock = yf.Ticker(ticker)
             df = stock.history(period="1y", interval="1wk")
@@ -151,21 +157,17 @@ def main():
                     current_all_under_40.append(ticker)
 
         except Exception as e:
-            print(f"[{ticker}] 오류 패스: {e}")
+            pass
         
-        # Yahoo Finance API 차단 방지 (0.1초 대기)
-        time.sleep(0.1)
+        time.sleep(0.05)
 
-    print("데이터 수집 완료. 메시지 생성 완료.")
+    print("데이터 처리 완료. 메시지 생성 중...")
 
-    # 지난주 40 이하였던 종목 목록 불러오기
     prev_under_40 = load_previous_data()
 
-    # 신규 진입 / 이탈 종목 계산
     entered_tickers = sorted(list(set(current_all_under_40) - set(prev_under_40)))
     exited_tickers = sorted(list(set(prev_under_40) - set(current_all_under_40)))
 
-    # 메시지 텍스트 구성
     str_40 = ", ".join(mfi_under_40) if mfi_under_40 else "없음"
     str_30 = ", ".join(mfi_under_30) if mfi_under_30 else "없음"
     str_20 = ", ".join(mfi_under_20) if mfi_under_20 else "없음"
@@ -196,7 +198,6 @@ def main():
 {str_exited}
 """
 
-    # 텔레그램 전송 및 현재 상태 저장
     send_telegram_message(message)
     save_current_data(current_all_under_40)
 
