@@ -9,24 +9,31 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-# ----------------------------- 종목 138개 -----------------------------
+# ----------------------------- 종목 180개 -----------------------------
 TICKERS = [
-    "AAPL", "ABNB", "ACM", "ADBE", "ALAB", "AMAT", "AMD", "AMPH", "AMZN", "ANET", 
-    "APH", "AVAV", "AVGO", "AXON", "AXP", "BA", "BABA", "BAC", "BBAI", "BE", 
-    "BEAM", "BIDU", "BMY", "BOX", "BRK.B", "CARR", "CCJ", "CEG", "CGNX", "CIFR", 
-    "CLSK", "CLS", "COHR", "COIN", "COST", "CRCL", "CRDO", "CRM", "CRSP", "CRWV", 
-    "CVX", "ELF", "EMR", "ENTG", "F", "FCX", "FIS", "FLR", "FRO", "GD", 
-    "GLW", "GOOG", "GOOGL", "HALO", "HD", "HIMS", "HUT", "ILMN", "INOD", "INTC", 
-    "INTU", "IONQ", "IREN", "JCI", "JNJ", "JOBY", "JPM", "KO", "KTOS", "LLY", 
-    "LNG", "LUNR", "MCD", "MDB", "META", "MRNA", "MSFT", "MSI", "MSTR", "MU", 
-    "NOW", "NVDA", "OKLO", "ORCL", "OXY", "PANW", "PATH", "PEP", "PFE", "PHM", 
-    "PL", "PLTR", "PM", "QCOM", "QLD", "QQQ", "QUBT", "SMCI", "SMMT", "SNDK", 
-    "SNOW", "SNPS", "SO", "SOFI", "SONY", "SOUND", "SOXX", "SPCX", "SPOT", "STRL", 
-    "STX", "SYM", "TEM", "TER", "TFC", "TM", "TME", "TOL", "TQQQ", "TSLA", 
-    "TSEM", "TT", "TXN", "U", "UBER", "ULTA", "UNH", "UPST", "UTHR", "VKTX", 
-    "VLO", "VRT", "VST", "WDC", "WM", "WMT", "WULF", "XOM"
+    "AAOI", "AAPL", "ABNB", "ACM", "ADBE", "AGQ", "ALAB", "AMAT", "AMD", "AMPH",
+    "AMZN", "ANET", "APH", "ARKF", "ASTS", "AVAV", "AVGO", "AXON", "AXP", "AXTI",
+    "BA", "BABA", "BAC", "BBAI", "BE", "BEAM", "BIDU", "BITX", "BMY", "BOTZ",
+    "BOX", "BRK.B", "BWXT", "CARR", "CCJ", "CEG", "CGNX", "CIFR", "CIR", "CLS",
+    "CLSK", "COHR", "COIN", "COST", "CPER", "CRCL", "CRDO", "CRM", "CRSP", "CRWV",
+    "DAL", "DDOG", "DE", "DELL", "DFH", "DFEN", "DGRO", "DIS", "DIVB", "DIVO",
+    "DRAM", "DVA", "EEM", "ELF", "EMR", "ENTG", "ETU", "EWL", "F", "FAS",
+    "FCX", "FIS", "FLR", "FRO", "GD", "GEV", "GLW", "GME", "GOOG", "GOOGL",
+    "HALO", "HD", "HIMS", "HOOD", "HUT", "IBM", "IEMG", "IGV", "ILMN", "INOD",
+    "INTC", "INTU", "IONQ", "IREN", "IWB", "JCI", "JNJ", "JOBY", "JPM", "KO",
+    "KTOS", "LHX", "LLY", "LMT", "LNG", "LRCX", "LULU", "LUNR", "MCD", "MDB",
+    "META", "MMM", "MP", "MRNA", "MRVL", "MSFT", "MSI", "MSTR", "MU", "NAIL",
+    "NBIS", "NEE", "NFLX", "NKE", "NOK", "NOW", "NRIX", "NTRA", "NU", "NVDA",
+    "O", "OKLO", "ORCL", "OXY", "PANW", "PATH", "PEP", "PFE", "PG", "PHM",
+    "PL", "PLTR", "PM", "PPA", "QCOM", "QLD", "QQQ", "QBTS", "QUBT", "RCAT",
+    "RDDT", "RDW", "RDVY", "RGTI", "RKLB", "ROBO", "SCHD", "SMCI", "SMMT", "SMR",
+    "SNDK", "SNOW", "SNPS", "SO", "SOFI", "SONY", "SOUN", "SOXL", "SOXX", "SPCX",
+    "SPOT", "STL", "STRL", "STX", "SYM", "T", "TCOM", "TCTG", "TCTM", "TE",
+    "TEM", "TER", "TFC", "TGTX", "TM", "TME", "TOL", "TQQQ", "TRIN", "TSLA",
+    "TSEM", "TT", "TXN", "U", "UBER", "UCO", "UGL", "ULTA", "UNH", "UPST",
+    "UTHR", "VEA", "VIG", "VKTX", "VLO", "VOOG", "VRT", "VST", "VYM", "WDC",
+    "WM", "WMT", "WULF", "XLC", "XLE", "XLF", "XLK", "XLY", "XOM"
 ]
-
 MFI_PERIOD = 14          # MFI 기간
 MFI_THRESHOLD = 40       # 이 값 이하만 알림
 DATA_PERIOD = "2y"       # 데이터 조회 기간
