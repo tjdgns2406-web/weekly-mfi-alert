@@ -24,7 +24,7 @@ TICKERS = [
 MFI_PERIOD = 14          # MFI 기간
 MFI_THRESHOLD = 30       # 이 값 이하만 알림
 DATA_PERIOD = "2y"       # 조회 기간 (주봉 약 104개)
-SEND_WHEN_EMPTY = False  # 해당 종목이 없을 때도 "없음" 메시지를 보낼지 여부
+SEND_WHEN_EMPTY = True  # 해당 종목이 없을 때도 "없음" 메시지를 보낼지 여부
 # ---------------------------------------------------------------
  
  
