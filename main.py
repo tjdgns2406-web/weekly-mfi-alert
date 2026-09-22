@@ -1,5 +1,5 @@
 """
-주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (30 이하 하이라이트)
+주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (30 이하 🔴 이모지 강조)
 """
 
 import os
@@ -133,19 +133,19 @@ def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -
     if not hits and not exited:
         return f"주봉 HA-MFI({MFI_PERIOD}) {MFI_THRESHOLD} 이하인 종목이 없습니다."
 
-    lines = [f"📉 <b>주봉 HA-MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)</b>", ""]
+    lines = [f"📉 주봉 HA-MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
     
-    # MFI 30 이하인 경우 <code> 태그로 수치 강조
+    # MFI 30 이하인 경우 수치 뒤에 🔴 이모지 부착
     for h in hits:
         if h['mfi'] <= 30:
-            lines.append(f"• {h['ticker']}: MFI <code>{h['mfi']:.1f}</code>")
+            lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f} 🔴")
         else:
             lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f}")
 
     lines.append("\n----------------------------------")
     
     if new_entries:
-        lines.append(f"🆕 <b>새로 추가된 종목 ({len(new_entries)}개):</b>")
+        lines.append(f"🆕 새로 추가된 종목 ({len(new_entries)}개):")
         lines.append("• " + ", ".join(new_entries))
     else:
         lines.append("🆕 새로 추가된 종목: 없음")
@@ -153,7 +153,7 @@ def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -
     lines.append("")
 
     if exited:
-        lines.append(f"🚪 <b>목록에서 이탈한 종목 ({len(exited)}개):</b>")
+        lines.append(f"🚪 목록에서 이탈한 종목 ({len(exited)}개):")
         lines.append("• " + ", ".join(exited))
     else:
         lines.append("🚪 목록에서 이탈한 종목: 없음")
@@ -168,9 +168,8 @@ def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -
 
 def send_telegram(token: str, chat_id: str, text: str) -> None:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    # parse_mode를 HTML로 설정
     resp = requests.post(
-        url, data={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}, timeout=15
+        url, data={"chat_id": chat_id, "text": text}, timeout=15
     )
     resp.raise_for_status()
 
