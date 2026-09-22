@@ -1,5 +1,5 @@
 """
-주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (30 이하 🔴 이모지 강조)
+주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (30 이하 🔻 강조 버전)
 """
 
 import os
@@ -9,7 +9,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-# ----------------------------- 설정 -----------------------------
+# ----------------------------- 종목 138개 -----------------------------
 TICKERS = [
     "AAPL", "ABNB", "ACM", "ADBE", "ALAB", "AMAT", "AMD", "AMPH", "AMZN", "ANET", 
     "APH", "AVAV", "AVGO", "AXON", "AXP", "BA", "BABA", "BAC", "BBAI", "BE", 
@@ -135,10 +135,10 @@ def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -
 
     lines = [f"📉 주봉 HA-MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
     
-    # MFI 30 이하인 경우 수치 뒤에 🔴 이모지 부착
+    # MFI 30 이하인 경우 작은 빨간 삼각형(🔻) 표시
     for h in hits:
         if h['mfi'] <= 30:
-            lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f} 🔴")
+            lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f} 🔻")
         else:
             lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f}")
 
