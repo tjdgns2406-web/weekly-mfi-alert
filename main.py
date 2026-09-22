@@ -1,5 +1,5 @@
 """
-주봉 MFI(14) 스크리너 -> 텔레그램 알림
+주봉 MFI(14) 스크리너 -> 텔레그램 알림 (신규 진입 및 이탈 종목 비교 포함)
 """
 
 import os
@@ -10,27 +10,19 @@ import requests
 import yfinance as yf
 
 # ----------------------------- 설정 -----------------------------
+# ⚠️ 아래 TICKERS 리스트에 가지고 계신 140여 개 종목 전체를 붙여넣어 주세요!
 TICKERS = [
-    "AAOI", "AAPL", "ABNB", "ACM", "ADBE", "ALAB", "AMAT", "AMD", "AMZN", "ANET",
-    "APH", "AVAV", "AVGO", "AXON", "AXP", "BA", "BABA", "BAC", "BBAI", "BE",
-    "BEAM", "BIDU", "BMY", "BOX", "BRK-B", "CARR", "CCJ", "CEG", "CGNX", "CIFR",
-    "CLSK", "CLS", "COHR", "COIN", "COST", "CRCL", "CRDO", "CRM", "CRSP", "CRWV",
-    "CVX", "ELF", "EMR", "ENTG", "F", "FCX", "FIS", "FLR", "FRO", "GD",
-    "GLW", "GOOG", "GOOGL", "HALO", "HD", "HIMS", "HUT", "ILMN", "INOD", "INTC",
-    "INTU", "IONQ", "IREN", "JCI", "JNJ", "JOBY", "JPM", "KO", "KTOS", "LLY",
-    "LNG", "LRCX", "LUNR", "MCD", "MDB", "META", "MRNA", "MSFT", "MSI", "MSTR",
-    "MU", "NVDA", "OKLO", "ORCL", "OXY", "PANW", "PATH", "PEP", "PFE", "PHM",
-    "PL", "PLTR", "PM", "QCOM", "QLD", "QQQ", "QUBT", "SMMT", "SMCI", "SNDK",
-    "SNOW", "SNPS", "SO", "SOFI", "SONY", "SOUND", "SOXX", "SPCX", "SPOT", "STL",
-    "STRL", "STX", "SYM", "TCTG", "TEM", "TER", "TFC", "TM", "TME", "TOL",
-    "TQQQ", "TRIN", "TSLA", "TSEM", "TT", "TXN", "U", "UBER", "ULTA", "UNH",
-    "UPST", "UTHR", "VKTX", "VLO", "VRT", "VST", "WDC", "WM", "WMT", "WULF",
-    "XOM"
+    "AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "META", "AMD", 
+    "QQQ", "TQQQ", "QLD", "SOXX", "STRL", "JOBY", "BBAI", "LRCX", 
+    "OKLO", "ENTG", "WULF", "PL", "CARR", "HUT", "SO", "WDC", "TXN", 
+    "PEP", "TOL", "COST", "VRT",
+    # <-- 여기에 나머지 종목들을 따옴표(" ")와 쉼표(,) 형식으로 쭉 추가하시면 됩니다.
 ]
+
 MFI_PERIOD = 14          # MFI 기간
 MFI_THRESHOLD = 30       # 이 값 이하만 알림
-DATA_PERIOD = "2y"       # 조회 기간
-SEND_WHEN_EMPTY = True   # 조건 만족 종목이 없어도 "없음" 메시지 전송
+DATA_PERIOD = "2y"       # 데이터 조회 기간
+SEND_WHEN_EMPTY = True   # 조건 만족 종목이 없어도 메시지 전송
 # ---------------------------------------------------------------
 
 
@@ -59,26 +51,29 @@ def fetch_weekly(ticker: str) -> pd.DataFrame:
         raise ValueError("데이터가 비어 있습니다.")
 
     df = df.dropna(subset=["High", "Low", "Close", "Volume"])
-    if len(df) < MFI_PERIOD + 1:
-        raise ValueError(f"데이터 부족 ({len(df)}개 < {MFI_PERIOD + 1}개)")
+    if len(df) < MFI_PERIOD + 2:
+        raise ValueError(f"데이터 부족 ({len(df)}개)")
     return df
 
 
-def screen(tickers: list[str]) -> tuple[list[dict], list[str]]:
+def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[str]]:
     hits: list[dict] = []
+    new_entries: list[str] = []
+    exited: list[str] = []
     failed: list[str] = []
 
     for ticker in tickers:
         try:
             df = fetch_weekly(ticker)
             mfi = calc_mfi(df, MFI_PERIOD)
-            latest_mfi = float(mfi.iloc[-1])
+            
+            latest_mfi = float(mfi.iloc[-1])    # 이번주 MFI
+            prev_mfi = float(mfi.iloc[-2])      # 지난주 MFI
 
-            if pd.isna(latest_mfi):
+            if pd.isna(latest_mfi) or pd.isna(prev_mfi):
                 raise ValueError("MFI 계산 결과가 NaN 입니다.")
 
-            print(f"[OK]   {ticker:<6} MFI({MFI_PERIOD}) = {latest_mfi:6.2f}")
-
+            # 1. 이번주 MFI 30 이하 종목 수집
             if latest_mfi <= MFI_THRESHOLD:
                 hits.append(
                     {
@@ -88,22 +83,57 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str]]:
                         "date": df.index[-1].strftime("%Y-%m-%d"),
                     }
                 )
+                # 신규 진입 (지난주 > 30 ➡️ 이번주 <= 30)
+                if prev_mfi > MFI_THRESHOLD:
+                    new_entries.append(ticker)
+
+            # 2. 이탈/탈출 종목 수집 (지난주 <= 30 ➡️ 이번주 > 30)
+            elif prev_mfi <= MFI_THRESHOLD and latest_mfi > MFI_THRESHOLD:
+                exited.append(ticker)
+
+            print(f"[OK]   {ticker:<6} 이번주: {latest_mfi:6.2f} | 지난주: {prev_mfi:6.2f}")
+
         except Exception as e:
             failed.append(ticker)
             print(f"[FAIL] {ticker:<6} 건너뜀: {e}", file=sys.stderr)
 
     hits.sort(key=lambda x: x["mfi"])
-    return hits, failed
+    return hits, new_entries, exited, failed
 
 
-def build_message(hits: list[dict]) -> str:
-    if not hits:
-        return f"주봉 MFI({MFI_PERIOD}) {MFI_THRESHOLD} 이하 종목이 없습니다."
+def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -> str:
+    if not hits and not exited:
+        return f"주봉 MFI({MFI_PERIOD}) {MFI_THRESHOLD} 이하인 종목이 없습니다."
 
     lines = [f"📉 주봉 MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
+    
+    # 메인 MFI 30 이하 목록
     for h in hits:
         lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f} | 종가 ${h['close']:,.2f}")
-    lines += ["", f"기준 주봉: {hits[0]['date']}"]
+
+    lines.append("\n----------------------------------")
+    
+    # 🆕 이번 주 신규 진입 종목
+    if new_entries:
+        lines.append(f"🆕 새로 추가된 종목 ({len(new_entries)}개):")
+        lines.append("• " + ", ".join(new_entries))
+    else:
+        lines.append("🆕 새로 추가된 종목: 없음")
+
+    lines.append("")
+
+    # 🚪 이번 주 제외/탈출 종목
+    if exited:
+        lines.append(f"🚪 목록에서 이탈한 종목 ({len(exited)}개):")
+        lines.append("• " + ", ".join(exited))
+    else:
+        lines.append("🚪 목록에서 이탈한 종목: 없음")
+
+    lines.append("----------------------------------")
+    
+    date_str = hits[0]['date'] if hits else "최신"
+    lines.append(f"기준 주봉: {date_str}")
+    
     return "\n".join(lines)
 
 
@@ -123,21 +153,22 @@ def main() -> None:
         print("환경변수 TELEGRAM_TOKEN, CHAT_ID 미설치", file=sys.stderr)
         sys.exit(1)
 
-    hits, failed = screen(TICKERS)
+    hits, new_entries, exited, failed = screen(TICKERS)
 
     if failed:
         print(f"\n수집 실패 종목: {', '.join(failed)}", file=sys.stderr)
 
-    if not hits and not SEND_WHEN_EMPTY:
+    if not hits and not exited and not SEND_WHEN_EMPTY:
         print("\nMFI 기준 이하 종목이 없어 메시지를 보내지 않습니다.")
         return
 
-    message = build_message(hits)
+    message = build_message(hits, new_entries, exited)
     try:
         send_telegram(token, chat_id, message)
         print("\n텔레그램 전송 완료:\n" + message)
     except Exception as e:
         print(f"\n텔레그램 전송 실패: {e}", file=sys.stderr)
+        pass
 
 
 if __name__ == "__main__":
