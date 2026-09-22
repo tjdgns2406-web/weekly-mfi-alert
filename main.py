@@ -10,12 +10,27 @@ import requests
 import yfinance as yf
 
 # ----------------------------- 설정 -----------------------------
-# ⚠️ 아래 TICKERS 리스트에 가지고 계신 140여 개 종목 전체를 붙여넣어 주세요!
+# ⚠️ 아래 TICKERS 리스트에 가지고 계신 138여 개 종목
 TICKERS = [
-    "AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "META", "AMD", 
-    "QQQ", "TQQQ", "QLD", "SOXX", "STRL", "JOBY", "BBAI", "LRCX", 
-    "OKLO", "ENTG", "WULF", "PL", "CARR", "HUT", "SO", "WDC", "TXN", 
-    "PEP", "TOL", "COST", "VRT",
+    "AAPL", "ABNB", "ACM", "ADBE", "ALAB", "AMAT", "AMD", "AMPH",
+    "AMZN", "ANET", "AOOI", "AVAV", "AVGO", "AXON", "AXP", "BA",
+    "BABA", "BAC", "BBAI", "BE", "BEAM", "BIDU", "BMY", "BOX",
+    "BRK.B", "CARR", "CCJ", "CEG", "CGNX", "CIFR", "CIR", "CLS",
+    "CLSK", "COHR", "COIN", "COST", "CRCL", "CRDO", "CRSP", "CRWV",
+    "CVX", "ELF", "EMR", "ENTG", "F", "FCX", "FIS", "FLR",
+    "FRO", "GD", "GLW", "GOOG", "GOOGL", "HALO", "HD", "HIMS",
+    "HUT", "ILMN", "INOD", "INTC", "INTU", "IONQ", "IREN", "JCI",
+    "JNJ", "JOBY", "JPM", "KO", "KTOS", "LNG", "LUNR", "MCD",
+    "MDB", "META", "MRNA", "MSFT", "MSI", "MSTR", "MU", "NOW",
+    "NVDA", "OKLO", "ORCL", "OXY", "PANW", "PATH", "PEP", "PFE",
+    "PHM", "PL", "PLTR", "PM", "QCOM", "QLD", "QQQ", "QUBT",
+    "SMCI", "SMMT", "SNDK", "SNOW", "SNPS", "SO", "SOFI", "SONY",
+    "SOXX", "SOUND", "SPCX", "SPOT", "STRL", "STX", "SYM", "TCTM",
+    "TEM", "TER", "TFC", "TM", "TME", "TOL", "TQQQ", "TSLA",
+    "TSEM", "TT", "TXN", "U", "UBER", "ULTA", "UNH", "UPST",
+    "UTHR", "VKTX", "VLO", "VRT", "VST", "WDC", "WM", "WMT",
+    "WULF", "XOM"
+]
     # <-- 여기에 나머지 종목들을 따옴표(" ")와 쉼표(,) 형식으로 쭉 추가하시면 됩니다.
 ]
 
