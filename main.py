@@ -1,5 +1,5 @@
 """
-주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (지난주 대비 상승/하락 기호 표기)
+주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (💹/🔻 이모지 반영 버전)
 """
 
 import os
@@ -144,10 +144,10 @@ def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -
 
     lines = [f"📉 주봉 HA-MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
     
-    # 지난주 대비 MFI 방향성에 따른 기호 표기 (상승: 🔺, 하락: 🔻)
+    # 2번 옵션 적용 (상승: 💹, 하락: 🔻)
     for h in hits:
         if h['mfi'] > h['prev_mfi']:
-            symbol = "🔺"
+            symbol = "💹"
         elif h['mfi'] < h['prev_mfi']:
             symbol = "🔻"
         else:
