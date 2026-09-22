@@ -2,8 +2,8 @@ name: Weekly MFI Alert Bot
 
 on:
   schedule:
-    # UTC 기준 금요일 24:00 = 한국 시간(KST) 토요일 오전 09:00
-    - cron: '0 0 * * 6'
+    # UTC 기준 금요일 02:00 = 한국 시간(KST) 토요일 오전 11:00
+    - cron: '0 2 * * 6'
   workflow_dispatch: # 수동 테스트용 버튼 생성
 
 jobs:
