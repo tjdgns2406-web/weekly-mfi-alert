@@ -5,7 +5,7 @@ import yfinance as yf
 import pandas as pd
 
 # ----------------------------------------------------
-# 1. 관심 종목 전체 리스트 (총 138개 / 알파벳순 정렬)
+# 1. 관심 종목 전체 리스트 (총 138개)
 # ----------------------------------------------------
 TICKERS = [
     "AAPL", "ABNB", "ACM", "ADBE", "ALAB", "AMAT", "AMD", "AMPH",
@@ -31,33 +31,44 @@ TICKERS = [
 HISTORY_FILE = "previous_mfi.json"
 
 # ----------------------------------------------------
-# 2. MFI(Money Flow Index) 계산 함수
+# 2. MFI(Money Flow Index) 안전 계산 함수
 # ----------------------------------------------------
 def calculate_mfi(df, period=14):
-    if len(df) < period + 1:
+    try:
+        if df is None or df.empty or len(df) < period + 1:
+            return None
+        
+        # yfinance 데이터 칼럼 파싱
+        high = df['High']
+        low = df['Low']
+        close = df['Close']
+        volume = df['Volume']
+
+        typical_price = (high + low + close) / 3
+        raw_money_flow = typical_price * volume
+        
+        positive_flow = [0.0] * len(df)
+        negative_flow = [0.0] * len(df)
+        
+        tp_values = typical_price.values
+        rmf_values = raw_money_flow.values
+        
+        for i in range(1, len(df)):
+            if tp_values[i] > tp_values[i - 1]:
+                positive_flow[i] = rmf_values[i]
+            elif tp_values[i] < tp_values[i - 1]:
+                negative_flow[i] = rmf_values[i]
+                
+        pos_mf = pd.Series(positive_flow, index=df.index).rolling(window=period).sum()
+        neg_mf = pd.Series(negative_flow, index=df.index).rolling(window=period).sum()
+        
+        mfi_ratio = pos_mf / neg_mf
+        mfi = 100 - (100 / (1 + mfi_ratio))
+        
+        val = mfi.iloc[-1]
+        return float(val) if not pd.isna(val) else None
+    except Exception as e:
         return None
-    
-    typical_price = (df['High'] + df['Low'] + df['Close']) / 3
-    raw_money_flow = typical_price * df['Volume']
-    
-    positive_flow = [0.0] * len(df)
-    negative_flow = [0.0] * len(df)
-    
-    tp_values = typical_price.values
-    rmf_values = raw_money_flow.values
-    
-    for i in range(1, len(df)):
-        if tp_values[i] > tp_values[i - 1]:
-            positive_flow[i] = rmf_values[i]
-        elif tp_values[i] < tp_values[i - 1]:
-            negative_flow[i] = rmf_values[i]
-            
-    pos_mf = pd.Series(positive_flow, index=df.index).rolling(window=period).sum()
-    neg_mf = pd.Series(negative_flow, index=df.index).rolling(window=period).sum()
-    
-    mfi_ratio = pos_mf / neg_mf
-    mfi = 100 - (100 / (1 + mfi_ratio))
-    return mfi.iloc[-1]
 
 # ----------------------------------------------------
 # 3. 지난주 데이터 로드 & 저장 함수
@@ -66,14 +77,19 @@ def load_previous_data():
     if os.path.exists(HISTORY_FILE):
         try:
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f).get("under_40", [])
-        except Exception:
+                data = json.load(f)
+                return data.get("under_40", [])
+        except Exception as e:
+            print(f"히스토리 로드 실패: {e}")
             return []
     return []
 
 def save_current_data(under_40_tickers):
-    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
-        json.dump({"under_40": under_40_tickers}, f, ensure_ascii=False, indent=2)
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump({"under_40": under_40_tickers}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"히스토리 저장 실패: {e}")
 
 # ----------------------------------------------------
 # 4. 텔레그램 메시지 전송 함수
@@ -84,6 +100,7 @@ def send_telegram_message(message):
     
     if not bot_token or not chat_id:
         print("Error: TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID가 설정되지 않았습니다.")
+        print("--- 메시지 내용 ---")
         print(message)
         return
 
@@ -93,7 +110,13 @@ def send_telegram_message(message):
         "text": message,
         "parse_mode": "Markdown"
     }
-    requests.post(url, json=payload)
+    
+    try:
+        res = requests.post(url, json=payload, timeout=10)
+        if res.status_code != 200:
+            print(f"텔레그램 전송 실패 (상태코드 {res.status_code}): {res.text}")
+    except Exception as e:
+        print(f"텔레그램 전송 중 예외 발생: {e}")
 
 # ----------------------------------------------------
 # 5. 메인 실행 로직
@@ -111,14 +134,12 @@ def main():
         try:
             stock = yf.Ticker(ticker)
             df = stock.history(period="1y", interval="1wk")
-            if df.empty or len(df) < 15:
-                continue
             
             mfi_val = calculate_mfi(df)
-            if mfi_val is None or pd.isna(mfi_val):
+            if mfi_val is None:
                 continue
 
-            # MFI 구간별 티커 분류 (가격 제외, 티커만 수집)
+            # MFI 구간별 티커 분류
             if mfi_val <= 10:
                 mfi_under_10.append(ticker)
                 current_all_under_40.append(ticker)
@@ -133,7 +154,8 @@ def main():
                 current_all_under_40.append(ticker)
 
         except Exception as e:
-            print(f"{ticker} 데이터 수집 중 오류: {e}")
+            print(f"[{ticker}] 수집 패스 - 사유: {e}")
+            continue
 
     # 지난주 40 이하였던 종목 목록 불러오기
     prev_under_40 = load_previous_data()
@@ -142,7 +164,7 @@ def main():
     entered_tickers = sorted(list(set(current_all_under_40) - set(prev_under_40)))
     exited_tickers = sorted(list(set(prev_under_40) - set(current_all_under_40)))
 
-    # 메시지 텍스트 구성 (티커만 쉼표로 표기)
+    # 메시지 텍스트 구성
     str_40 = ", ".join(mfi_under_40) if mfi_under_40 else "없음"
     str_30 = ", ".join(mfi_under_30) if mfi_under_30 else "없음"
     str_20 = ", ".join(mfi_under_20) if mfi_under_20 else "없음"
