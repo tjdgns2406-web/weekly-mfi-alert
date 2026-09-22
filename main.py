@@ -31,8 +31,6 @@ TICKERS = [
     "UTHR", "VKTX", "VLO", "VRT", "VST", "WDC", "WM", "WMT",
     "WULF", "XOM"
 ]
-    # <-- 여기에 나머지 종목들을 따옴표(" ")와 쉼표(,) 형식으로 쭉 추가하시면 됩니다.
-]
 
 MFI_PERIOD = 14          # MFI 기간
 MFI_THRESHOLD = 30       # 이 값 이하만 알림
