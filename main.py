@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 import yfinance as yf
 import pandas as pd
@@ -38,7 +39,6 @@ def calculate_mfi(df, period=14):
         if df is None or df.empty or len(df) < period + 1:
             return None
         
-        # yfinance 데이터 칼럼 파싱
         high = df['High']
         low = df['Low']
         close = df['Close']
@@ -67,7 +67,7 @@ def calculate_mfi(df, period=14):
         
         val = mfi.iloc[-1]
         return float(val) if not pd.isna(val) else None
-    except Exception as e:
+    except Exception:
         return None
 
 # ----------------------------------------------------
@@ -79,8 +79,7 @@ def load_previous_data():
             with open(HISTORY_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return data.get("under_40", [])
-        except Exception as e:
-            print(f"히스토리 로드 실패: {e}")
+        except Exception:
             return []
     return []
 
@@ -88,33 +87,34 @@ def save_current_data(under_40_tickers):
     try:
         with open(HISTORY_FILE, "w", encoding="utf-8") as f:
             json.dump({"under_40": under_40_tickers}, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"히스토리 저장 실패: {e}")
+    except Exception:
+        pass
 
 # ----------------------------------------------------
-# 4. 텔레그램 메시지 전송 함수
+# 4. 텔레그램 메시지 전송 함수 (마크다운 에러 방지)
 # ----------------------------------------------------
 def send_telegram_message(message):
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     
     if not bot_token or not chat_id:
-        print("Error: TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID가 설정되지 않았습니다.")
-        print("--- 메시지 내용 ---")
+        print("[경고] TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID가 설정되지 않았습니다.")
         print(message)
         return
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    
+    # parse_mode를 제거하여 특수문자로 인한 전송 실패 방지
     payload = {
         "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "Markdown"
+        "text": message
     }
     
     try:
         res = requests.post(url, json=payload, timeout=10)
+        print(f"텔레그램 응답 코드: {res.status_code}")
         if res.status_code != 200:
-            print(f"텔레그램 전송 실패 (상태코드 {res.status_code}): {res.text}")
+            print(f"텔레그램 응답 상세: {res.text}")
     except Exception as e:
         print(f"텔레그램 전송 중 예외 발생: {e}")
 
@@ -129,33 +129,34 @@ def main():
     
     current_all_under_40 = []
 
-    # 전체 종목 주봉 데이터 불러오기 및 MFI 계산
-    for ticker in TICKERS:
+    print("데이터 수집 시작...")
+    for idx, ticker in enumerate(TICKERS):
         try:
             stock = yf.Ticker(ticker)
             df = stock.history(period="1y", interval="1wk")
             
             mfi_val = calculate_mfi(df)
-            if mfi_val is None:
-                continue
-
-            # MFI 구간별 티커 분류
-            if mfi_val <= 10:
-                mfi_under_10.append(ticker)
-                current_all_under_40.append(ticker)
-            elif mfi_val <= 20:
-                mfi_under_20.append(ticker)
-                current_all_under_40.append(ticker)
-            elif mfi_val <= 30:
-                mfi_under_30.append(ticker)
-                current_all_under_40.append(ticker)
-            elif mfi_val <= 40:
-                mfi_under_40.append(ticker)
-                current_all_under_40.append(ticker)
+            if mfi_val is not None:
+                if mfi_val <= 10:
+                    mfi_under_10.append(ticker)
+                    current_all_under_40.append(ticker)
+                elif mfi_val <= 20:
+                    mfi_under_20.append(ticker)
+                    current_all_under_40.append(ticker)
+                elif mfi_val <= 30:
+                    mfi_under_30.append(ticker)
+                    current_all_under_40.append(ticker)
+                elif mfi_val <= 40:
+                    mfi_under_40.append(ticker)
+                    current_all_under_40.append(ticker)
 
         except Exception as e:
-            print(f"[{ticker}] 수집 패스 - 사유: {e}")
-            continue
+            print(f"[{ticker}] 오류 패스: {e}")
+        
+        # Yahoo Finance API 차단 방지 (0.1초 대기)
+        time.sleep(0.1)
+
+    print("데이터 수집 완료. 메시지 생성 완료.")
 
     # 지난주 40 이하였던 종목 목록 불러오기
     prev_under_40 = load_previous_data()
@@ -173,25 +174,25 @@ def main():
     str_entered = ", ".join(entered_tickers) if entered_tickers else "없음"
     str_exited = ", ".join(exited_tickers) if exited_tickers else "없음"
 
-    message = f"""📊 *[주간 MFI 지표 알림]*
+    message = f"""📊 [주간 MFI 지표 알림]
 
-🟢 *MFI 40 이하*
+🟢 MFI 40 이하
 {str_40}
 
-🟡 *MFI 30 이하*
+🟡 MFI 30 이하
 {str_30}
 
-🟠 *MFI 20 이하*
+🟠 MFI 20 이하
 {str_20}
 
-🔴 *MFI 10 이하*
+🔴 MFI 10 이하
 {str_10}
 
 ━━━━━━━━━━━━━━━━━━
-🆕 *이번 주 신규 진입 (40 이하)*
+🆕 이번 주 신규 진입 (40 이하)
 {str_entered}
 
-🚪 *이번 주 목록 이탈 (40 초과)*
+🚪 이번 주 목록 이탈 (40 초과)
 {str_exited}
 """
 
