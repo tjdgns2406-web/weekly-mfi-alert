@@ -1,16 +1,12 @@
-"""
-주봉 MFI(14) 스크리너 -> 텔레그램 알림 (신규 진입 및 이탈 종목 비교 포함)
-"""
-
 import os
-import sys
-
-import pandas as pd
+import json
 import requests
 import yfinance as yf
+import pandas as pd
 
-# ----------------------------- 설정 -----------------------------
-# ⚠️ 아래 TICKERS 리스트에 가지고 계신 138여 개 종목
+# ----------------------------------------------------
+# 1. 관심 종목 전체 리스트 (총 138개 / 알파벳순 정렬)
+# ----------------------------------------------------
 TICKERS = [
     "AAPL", "ABNB", "ACM", "ADBE", "ALAB", "AMAT", "AMD", "AMPH",
     "AMZN", "ANET", "AOOI", "AVAV", "AVGO", "AXON", "AXP", "BA",
@@ -32,157 +28,154 @@ TICKERS = [
     "WULF", "XOM"
 ]
 
-MFI_PERIOD = 14          # MFI 기간
-MFI_THRESHOLD = 30       # 이 값 이하만 알림
-DATA_PERIOD = "2y"       # 데이터 조회 기간
-SEND_WHEN_EMPTY = True   # 조건 만족 종목이 없어도 메시지 전송
-# ---------------------------------------------------------------
+HISTORY_FILE = "previous_mfi.json"
 
-
-def calc_mfi(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    tp = (df["High"] + df["Low"] + df["Close"]) / 3
-    mf = tp * df["Volume"]
-    delta = tp.diff()
-
-    pos = mf.where(delta > 0, 0.0).where(delta.notna())
-    neg = mf.where(delta < 0, 0.0).where(delta.notna())
-
-    pos_sum = pos.rolling(period).sum()
-    neg_sum = neg.rolling(period).sum()
-
-    ratio = pos_sum / neg_sum
-    mfi = 100 - 100 / (1 + ratio)
-    mfi = mfi.where(~((pos_sum == 0) & (neg_sum == 0)), 50.0)
-    return mfi
-
-
-def fetch_weekly(ticker: str) -> pd.DataFrame:
-    df = yf.Ticker(ticker).history(
-        period=DATA_PERIOD, interval="1wk", auto_adjust=False
-    )
-    if df is None or df.empty:
-        raise ValueError("데이터가 비어 있습니다.")
-
-    df = df.dropna(subset=["High", "Low", "Close", "Volume"])
-    if len(df) < MFI_PERIOD + 2:
-        raise ValueError(f"데이터 부족 ({len(df)}개)")
-    return df
-
-
-def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[str]]:
-    hits: list[dict] = []
-    new_entries: list[str] = []
-    exited: list[str] = []
-    failed: list[str] = []
-
-    for ticker in tickers:
-        try:
-            df = fetch_weekly(ticker)
-            mfi = calc_mfi(df, MFI_PERIOD)
+# ----------------------------------------------------
+# 2. MFI(Money Flow Index) 계산 함수
+# ----------------------------------------------------
+def calculate_mfi(df, period=14):
+    if len(df) < period + 1:
+        return None
+    
+    typical_price = (df['High'] + df['Low'] + df['Close']) / 3
+    raw_money_flow = typical_price * df['Volume']
+    
+    positive_flow = [0.0] * len(df)
+    negative_flow = [0.0] * len(df)
+    
+    tp_values = typical_price.values
+    rmf_values = raw_money_flow.values
+    
+    for i in range(1, len(df)):
+        if tp_values[i] > tp_values[i - 1]:
+            positive_flow[i] = rmf_values[i]
+        elif tp_values[i] < tp_values[i - 1]:
+            negative_flow[i] = rmf_values[i]
             
-            latest_mfi = float(mfi.iloc[-1])    # 이번주 MFI
-            prev_mfi = float(mfi.iloc[-2])      # 지난주 MFI
-
-            if pd.isna(latest_mfi) or pd.isna(prev_mfi):
-                raise ValueError("MFI 계산 결과가 NaN 입니다.")
-
-            # 1. 이번주 MFI 30 이하 종목 수집
-            if latest_mfi <= MFI_THRESHOLD:
-                hits.append(
-                    {
-                        "ticker": ticker,
-                        "mfi": latest_mfi,
-                        "close": float(df["Close"].iloc[-1]),
-                        "date": df.index[-1].strftime("%Y-%m-%d"),
-                    }
-                )
-                # 신규 진입 (지난주 > 30 ➡️ 이번주 <= 30)
-                if prev_mfi > MFI_THRESHOLD:
-                    new_entries.append(ticker)
-
-            # 2. 이탈/탈출 종목 수집 (지난주 <= 30 ➡️ 이번주 > 30)
-            elif prev_mfi <= MFI_THRESHOLD and latest_mfi > MFI_THRESHOLD:
-                exited.append(ticker)
-
-            print(f"[OK]   {ticker:<6} 이번주: {latest_mfi:6.2f} | 지난주: {prev_mfi:6.2f}")
-
-        except Exception as e:
-            failed.append(ticker)
-            print(f"[FAIL] {ticker:<6} 건너뜀: {e}", file=sys.stderr)
-
-    hits.sort(key=lambda x: x["mfi"])
-    return hits, new_entries, exited, failed
-
-
-def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -> str:
-    if not hits and not exited:
-        return f"주봉 MFI({MFI_PERIOD}) {MFI_THRESHOLD} 이하인 종목이 없습니다."
-
-    lines = [f"📉 주봉 MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
+    pos_mf = pd.Series(positive_flow, index=df.index).rolling(window=period).sum()
+    neg_mf = pd.Series(negative_flow, index=df.index).rolling(window=period).sum()
     
-    # 메인 MFI 30 이하 목록
-    for h in hits:
-        lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f} | 종가 ${h['close']:,.2f}")
+    mfi_ratio = pos_mf / neg_mf
+    mfi = 100 - (100 / (1 + mfi_ratio))
+    return mfi.iloc[-1]
 
-    lines.append("\n----------------------------------")
+# ----------------------------------------------------
+# 3. 지난주 데이터 로드 & 저장 함수
+# ----------------------------------------------------
+def load_previous_data():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f).get("under_40", [])
+        except Exception:
+            return []
+    return []
+
+def save_current_data(under_40_tickers):
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump({"under_40": under_40_tickers}, f, ensure_ascii=False, indent=2)
+
+# ----------------------------------------------------
+# 4. 텔레그램 메시지 전송 함수
+# ----------------------------------------------------
+def send_telegram_message(message):
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     
-    # 🆕 이번 주 신규 진입 종목
-    if new_entries:
-        lines.append(f"🆕 새로 추가된 종목 ({len(new_entries)}개):")
-        lines.append("• " + ", ".join(new_entries))
-    else:
-        lines.append("🆕 새로 추가된 종목: 없음")
-
-    lines.append("")
-
-    # 🚪 이번 주 제외/탈출 종목
-    if exited:
-        lines.append(f"🚪 목록에서 이탈한 종목 ({len(exited)}개):")
-        lines.append("• " + ", ".join(exited))
-    else:
-        lines.append("🚪 목록에서 이탈한 종목: 없음")
-
-    lines.append("----------------------------------")
-    
-    date_str = hits[0]['date'] if hits else "최신"
-    lines.append(f"기준 주봉: {date_str}")
-    
-    return "\n".join(lines)
-
-
-def send_telegram(token: str, chat_id: str, text: str) -> None:
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    resp = requests.post(
-        url, data={"chat_id": chat_id, "text": text}, timeout=15
-    )
-    resp.raise_for_status()
-
-
-def main() -> None:
-    token = os.environ.get("TELEGRAM_TOKEN", "").strip()
-    chat_id = os.environ.get("CHAT_ID", "").strip()
-
-    if not token or not chat_id:
-        print("환경변수 TELEGRAM_TOKEN, CHAT_ID 미설치", file=sys.stderr)
-        sys.exit(1)
-
-    hits, new_entries, exited, failed = screen(TICKERS)
-
-    if failed:
-        print(f"\n수집 실패 종목: {', '.join(failed)}", file=sys.stderr)
-
-    if not hits and not exited and not SEND_WHEN_EMPTY:
-        print("\nMFI 기준 이하 종목이 없어 메시지를 보내지 않습니다.")
+    if not bot_token or not chat_id:
+        print("Error: TELEGRAM_BOT_TOKEN 또는 TELEGRAM_CHAT_ID가 설정되지 않았습니다.")
+        print(message)
         return
 
-    message = build_message(hits, new_entries, exited)
-    try:
-        send_telegram(token, chat_id, message)
-        print("\n텔레그램 전송 완료:\n" + message)
-    except Exception as e:
-        print(f"\n텔레그램 전송 실패: {e}", file=sys.stderr)
-        pass
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    requests.post(url, json=payload)
 
+# ----------------------------------------------------
+# 5. 메인 실행 로직
+# ----------------------------------------------------
+def main():
+    mfi_under_40 = []
+    mfi_under_30 = []
+    mfi_under_20 = []
+    mfi_under_10 = []
+    
+    current_all_under_40 = []
+
+    # 전체 종목 주봉 데이터 불러오기 및 MFI 계산
+    for ticker in TICKERS:
+        try:
+            stock = yf.Ticker(ticker)
+            df = stock.history(period="1y", interval="1wk")
+            if df.empty or len(df) < 15:
+                continue
+            
+            mfi_val = calculate_mfi(df)
+            if mfi_val is None or pd.isna(mfi_val):
+                continue
+
+            # MFI 구간별 티커 분류 (가격 제외, 티커만 수집)
+            if mfi_val <= 10:
+                mfi_under_10.append(ticker)
+                current_all_under_40.append(ticker)
+            elif mfi_val <= 20:
+                mfi_under_20.append(ticker)
+                current_all_under_40.append(ticker)
+            elif mfi_val <= 30:
+                mfi_under_30.append(ticker)
+                current_all_under_40.append(ticker)
+            elif mfi_val <= 40:
+                mfi_under_40.append(ticker)
+                current_all_under_40.append(ticker)
+
+        except Exception as e:
+            print(f"{ticker} 데이터 수집 중 오류: {e}")
+
+    # 지난주 40 이하였던 종목 목록 불러오기
+    prev_under_40 = load_previous_data()
+
+    # 신규 진입 / 이탈 종목 계산
+    entered_tickers = sorted(list(set(current_all_under_40) - set(prev_under_40)))
+    exited_tickers = sorted(list(set(prev_under_40) - set(current_all_under_40)))
+
+    # 메시지 텍스트 구성 (티커만 쉼표로 표기)
+    str_40 = ", ".join(mfi_under_40) if mfi_under_40 else "없음"
+    str_30 = ", ".join(mfi_under_30) if mfi_under_30 else "없음"
+    str_20 = ", ".join(mfi_under_20) if mfi_under_20 else "없음"
+    str_10 = ", ".join(mfi_under_10) if mfi_under_10 else "없음"
+
+    str_entered = ", ".join(entered_tickers) if entered_tickers else "없음"
+    str_exited = ", ".join(exited_tickers) if exited_tickers else "없음"
+
+    message = f"""📊 *[주간 MFI 지표 알림]*
+
+🟢 *MFI 40 이하*
+{str_40}
+
+🟡 *MFI 30 이하*
+{str_30}
+
+🟠 *MFI 20 이하*
+{str_20}
+
+🔴 *MFI 10 이하*
+{str_10}
+
+━━━━━━━━━━━━━━━━━━
+🆕 *이번 주 신규 진입 (40 이하)*
+{str_entered}
+
+🚪 *이번 주 목록 이탈 (40 초과)*
+{str_exited}
+"""
+
+    # 텔레그램 전송 및 현재 상태 저장
+    send_telegram_message(message)
+    save_current_data(current_all_under_40)
 
 if __name__ == "__main__":
     main()
