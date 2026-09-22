@@ -11,28 +11,24 @@ import yfinance as yf
 
 # ----------------------------- 설정 -----------------------------
 TICKERS = [
-    "AAPL", "ABNB", "ACM", "ADBE", "ALAB", "AMAT", "AMD", "AMPH",
-    "AMZN", "ANET", "AOOI", "AVAV", "AVGO", "AXON", "AXP", "BA",
-    "BABA", "BAC", "BBAI", "BE", "BEAM", "BIDU", "BMY", "BOX",
-    "BRK.B", "CARR", "CCJ", "CEG", "CGNX", "CIFR", "CIR", "CLS",
-    "CLSK", "COHR", "COIN", "COST", "CRCL", "CRDO", "CRSP", "CRWV",
-    "CVX", "ELF", "EMR", "ENTG", "F", "FCX", "FIS", "FLR",
-    "FRO", "GD", "GLW", "GOOG", "GOOGL", "HALO", "HD", "HIMS",
-    "HUT", "ILMN", "INOD", "INTC", "INTU", "IONQ", "IREN", "JCI",
-    "JNJ", "JOBY", "JPM", "KO", "KTOS", "LNG", "LUNR", "MCD",
-    "MDB", "META", "MRNA", "MSFT", "MSI", "MSTR", "MU", "NOW",
-    "NVDA", "OKLO", "ORCL", "OXY", "PANW", "PATH", "PEP", "PFE",
-    "PHM", "PL", "PLTR", "PM", "QCOM", "QLD", "QQQ", "QUBT",
-    "SMCI", "SMMT", "SNDK", "SNOW", "SNPS", "SO", "SOFI", "SONY",
-    "SOXX", "SOUND", "SPCX", "SPOT", "STRL", "STX", "SYM", "TCTM",
-    "TEM", "TER", "TFC", "TM", "TME", "TOL", "TQQQ", "TSLA",
-    "TSEM", "TT", "TXN", "U", "UBER", "ULTA", "UNH", "UPST",
-    "UTHR", "VKTX", "VLO", "VRT", "VST", "WDC", "WM", "WMT",
-    "WULF", "XOM"
+    "AAPL", "ABNB", "ACM", "ADBE", "ALAB", "AMAT", "AMD", "AMPH", "AMZN", "ANET", 
+    "APH", "AVAV", "AVGO", "AXON", "AXP", "BA", "BABA", "BAC", "BBAI", "BE", 
+    "BEAM", "BIDU", "BMY", "BOX", "BRK.B", "CARR", "CCJ", "CEG", "CGNX", "CIFR", 
+    "CLSK", "CLS", "COHR", "COIN", "COST", "CRCL", "CRDO", "CRM", "CRSP", "CRWV", 
+    "CVX", "ELF", "EMR", "ENTG", "F", "FCX", "FIS", "FLR", "FRO", "GD", 
+    "GLW", "GOOG", "GOOGL", "HALO", "HD", "HIMS", "HUT", "ILMN", "INOD", "INTC", 
+    "INTU", "IONQ", "IREN", "JCI", "JNJ", "JOBY", "JPM", "KO", "KTOS", "LLY", 
+    "LNG", "LUNR", "MCD", "MDB", "META", "MRNA", "MSFT", "MSI", "MSTR", "MU", 
+    "NOW", "NVDA", "OKLO", "ORCL", "OXY", "PANW", "PATH", "PEP", "PFE", "PHM", 
+    "PL", "PLTR", "PM", "QCOM", "QLD", "QQQ", "QUBT", "SMCI", "SMMT", "SNDK", 
+    "SNOW", "SNPS", "SO", "SOFI", "SONY", "SOUND", "SOXX", "SPCX", "SPOT", "STRL", 
+    "STX", "SYM", "TEM", "TER", "TFC", "TM", "TME", "TOL", "TQQQ", "TSLA", 
+    "TSEM", "TT", "TXN", "U", "UBER", "ULTA", "UNH", "UPST", "UTHR", "VKTX", 
+    "VLO", "VRT", "VST", "WDC", "WM", "WMT", "WULF", "XOM"
 ]
 
 MFI_PERIOD = 14          # MFI 기간
-MFI_THRESHOLD = 40       # 이 값 이하만 알림
+MFI_THRESHOLD = 40       # 이 값 이하만 알림 (40으로 수정)
 DATA_PERIOD = "2y"       # 데이터 조회 기간
 SEND_WHEN_EMPTY = True   # 조건 만족 종목이 없어도 메시지 전송
 # ---------------------------------------------------------------
@@ -85,7 +81,7 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
             if pd.isna(latest_mfi) or pd.isna(prev_mfi):
                 raise ValueError("MFI 계산 결과가 NaN 입니다.")
 
-            # 1. 이번주 MFI 30 이하 종목 수집
+            # 1. 이번주 MFI 40 이하 종목 수집
             if latest_mfi <= MFI_THRESHOLD:
                 hits.append(
                     {
@@ -95,11 +91,11 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
                         "date": df.index[-1].strftime("%Y-%m-%d"),
                     }
                 )
-                # 신규 진입 (지난주 > 30 ➡️ 이번주 <= 30)
+                # 신규 진입 (지난주 > 40 ➡️ 이번주 <= 40)
                 if prev_mfi > MFI_THRESHOLD:
                     new_entries.append(ticker)
 
-            # 2. 이탈/탈출 종목 수집 (지난주 <= 30 ➡️ 이번주 > 30)
+            # 2. 이탈/탈출 종목 수집 (지난주 <= 40 ➡️ 이번주 > 40)
             elif prev_mfi <= MFI_THRESHOLD and latest_mfi > MFI_THRESHOLD:
                 exited.append(ticker)
 
@@ -119,7 +115,7 @@ def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -
 
     lines = [f"📉 주봉 MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
     
-    # 메인 MFI 30 이하 목록
+    # 메인 MFI 40 이하 목록
     for h in hits:
         lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f} | 종가 ${h['close']:,.2f}")
 
