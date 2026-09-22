@@ -1,5 +1,5 @@
 """
-주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (30 이하 🔻 강조 버전)
+주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (지난주 대비 상승/하락 기호 표기)
 """
 
 import os
@@ -9,7 +9,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-# ----------------------------- 종목 180개 -----------------------------
+# ----------------------------- 설정 -----------------------------
 TICKERS = [
     "AAOI", "AAPL", "ABNB", "ACM", "ADBE", "AGQ", "ALAB", "AMAT", "AMD", "AMPH",
     "AMZN", "ANET", "APH", "ARKF", "ASTS", "AVAV", "AVGO", "AXON", "AXP", "AXTI",
@@ -34,6 +34,7 @@ TICKERS = [
     "UTHR", "VEA", "VIG", "VKTX", "VLO", "VOOG", "VRT", "VST", "VYM", "WDC",
     "WM", "WMT", "WULF", "XLC", "XLE", "XLF", "XLK", "XLY", "XOM"
 ]
+
 MFI_PERIOD = 14          # MFI 기간
 MFI_THRESHOLD = 40       # 이 값 이하만 알림
 DATA_PERIOD = "2y"       # 데이터 조회 기간
@@ -114,6 +115,7 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
                     {
                         "ticker": ticker,
                         "mfi": latest_mfi,
+                        "prev_mfi": prev_mfi,
                         "date": raw_df.index[-1].strftime("%Y-%m-%d"),
                     }
                 )
@@ -142,12 +144,16 @@ def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -
 
     lines = [f"📉 주봉 HA-MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
     
-    # MFI 30 이하인 경우 작은 빨간 삼각형(🔻) 표시
+    # 지난주 대비 MFI 방향성에 따른 기호 표기 (상승: 🔺, 하락: 🔻)
     for h in hits:
-        if h['mfi'] <= 30:
-            lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f} 🔻")
+        if h['mfi'] > h['prev_mfi']:
+            symbol = "🔺"
+        elif h['mfi'] < h['prev_mfi']:
+            symbol = "🔻"
         else:
-            lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f}")
+            symbol = ""
+            
+        lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f} {symbol}".strip())
 
     lines.append("\n----------------------------------")
     
