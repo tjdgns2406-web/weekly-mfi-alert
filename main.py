@@ -1,5 +1,5 @@
 """
-주봉 MFI(14) 스크리너 -> 텔레그램 알림 (신규 진입 및 이탈 종목 비교 포함)
+주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (종가 표기 제외 버전)
 """
 
 import os
@@ -28,13 +28,37 @@ TICKERS = [
 ]
 
 MFI_PERIOD = 14          # MFI 기간
-MFI_THRESHOLD = 40       # 이 값 이하만 알림 (40으로 수정)
+MFI_THRESHOLD = 40       # 이 값 이하만 알림
 DATA_PERIOD = "2y"       # 데이터 조회 기간
 SEND_WHEN_EMPTY = True   # 조건 만족 종목이 없어도 메시지 전송
 # ---------------------------------------------------------------
 
 
+def convert_to_heikin_ashi(df: pd.DataFrame) -> pd.DataFrame:
+    """일반 OHLCV 데이터를 하이킨아시(Heikin-Ashi) OHLCV로 변환"""
+    ha_df = df.copy()
+    
+    # HA_Close 계산
+    ha_df["Close"] = (df["Open"] + df["High"] + df["Low"] + df["Close"]) / 4
+
+    # HA_Open 계산
+    ha_open = [0.0] * len(df)
+    ha_open[0] = (df["Open"].iloc[0] + df["Close"].iloc[0]) / 2
+    
+    for i in range(1, len(df)):
+        ha_open[i] = (ha_open[i - 1] + ha_df["Close"].iloc[i - 1]) / 2
+        
+    ha_df["Open"] = ha_open
+
+    # HA_High, HA_Low 계산
+    ha_df["High"] = ha_df[["High", "Open", "Close"]].max(axis=1)
+    ha_df["Low"] = ha_df[["Low", "Open", "Close"]].min(axis=1)
+
+    return ha_df
+
+
 def calc_mfi(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """MFI(Money Flow Index) 계산"""
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
     mf = tp * df["Volume"]
     delta = tp.diff()
@@ -58,7 +82,7 @@ def fetch_weekly(ticker: str) -> pd.DataFrame:
     if df is None or df.empty:
         raise ValueError("데이터가 비어 있습니다.")
 
-    df = df.dropna(subset=["High", "Low", "Close", "Volume"])
+    df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
     if len(df) < MFI_PERIOD + 2:
         raise ValueError(f"데이터 부족 ({len(df)}개)")
     return df
@@ -72,11 +96,16 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
 
     for ticker in tickers:
         try:
-            df = fetch_weekly(ticker)
-            mfi = calc_mfi(df, MFI_PERIOD)
+            raw_df = fetch_weekly(ticker)
             
-            latest_mfi = float(mfi.iloc[-1])    # 이번주 MFI
-            prev_mfi = float(mfi.iloc[-2])      # 지난주 MFI
+            # 하이킨아시 캔들로 변환
+            ha_df = convert_to_heikin_ashi(raw_df)
+            
+            # 하이킨아시 데이터 기반 MFI 계산
+            mfi = calc_mfi(ha_df, MFI_PERIOD)
+            
+            latest_mfi = float(mfi.iloc[-1])    # 이번주 하이킨아시 MFI
+            prev_mfi = float(mfi.iloc[-2])      # 지난주 하이킨아시 MFI
 
             if pd.isna(latest_mfi) or pd.isna(prev_mfi):
                 raise ValueError("MFI 계산 결과가 NaN 입니다.")
@@ -87,8 +116,7 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
                     {
                         "ticker": ticker,
                         "mfi": latest_mfi,
-                        "close": float(df["Close"].iloc[-1]),
-                        "date": df.index[-1].strftime("%Y-%m-%d"),
+                        "date": raw_df.index[-1].strftime("%Y-%m-%d"),
                     }
                 )
                 # 신규 진입 (지난주 > 40 ➡️ 이번주 <= 40)
@@ -99,7 +127,7 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
             elif prev_mfi <= MFI_THRESHOLD and latest_mfi > MFI_THRESHOLD:
                 exited.append(ticker)
 
-            print(f"[OK]   {ticker:<6} 이번주: {latest_mfi:6.2f} | 지난주: {prev_mfi:6.2f}")
+            print(f"[OK]   {ticker:<6} HA MFI 이번주: {latest_mfi:6.2f} | 지난주: {prev_mfi:6.2f}")
 
         except Exception as e:
             failed.append(ticker)
@@ -111,13 +139,13 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
 
 def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -> str:
     if not hits and not exited:
-        return f"주봉 MFI({MFI_PERIOD}) {MFI_THRESHOLD} 이하인 종목이 없습니다."
+        return f"주봉 HA-MFI({MFI_PERIOD}) {MFI_THRESHOLD} 이하인 종목이 없습니다."
 
-    lines = [f"📉 주봉 MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
+    lines = [f"📉 주봉 HA-MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
     
-    # 메인 MFI 40 이하 목록
+    # 종가 없이 MFI 수치만 표기
     for h in hits:
-        lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f} | 종가 ${h['close']:,.2f}")
+        lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f}")
 
     lines.append("\n----------------------------------")
     
