@@ -11,15 +11,30 @@ import yfinance as yf
 
 # ----------------------------- 설정 -----------------------------
 TICKERS = [
+    # 기존 미국 주식/ETF (12개)
     "AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL",
     "META", "AMD", "QQQ", "TQQQ", "QLD", "SOXX",
+
+    # 추가 관심 종목 (검증 완료)
+    "MU", "MCD", "MRNA", "MSI", "MDB", "BIDU", "VKTX", "BOX", "VLO", "BAC",
+    "BRK-B", "VRT", "BA", "AVGO", "BMY", "BE", "VST", "BBAI", "BEAM", "SOUND",
+    "CIFR", "SNDK", "SO", "SMMT", "NOW", "CRM", "CLS", "LNG", "CVX", "SONY",
+    "SOFI", "SMCI", "SNOW", "STRL", "MSTR", "SPOT", "SNPS", "SYM", "CRCL", "STX",
+    "ANET", "AXP", "ALAB", "IREN", "IONQ", "BABA", "GOOG", "APH", "ACM", "AXON",
+    "ADBE", "AMAT", "AAOI", "UPST", "EMR", "AVAV", "ABNB", "XOM", "ELF", "ORCL",
+    "OKLO", "OXY", "UBER", "ULTA", "WMT", "WDC", "WM", "UTHR", "UNH", "U",
+    "PATH", "INOD", "ENTG", "INTC", "INTU", "LUNR", "LLY", "ILMN", "GD", "JPM",
+    "JOBY", "JNJ", "JCI", "CCJ", "CARR", "CEG", "CGNX", "GLW", "COST", "COIN",
+    "KO", "COHR", "QUBT", "QCOM", "KTOS", "CRDO", "CRSP", "CLSK", "TSEM", "TER",
+    "WULF", "TXN", "TME", "TEM", "TM", "TOL", "TT", "TFC", "TCTG", "PLTR",
+    "PANW", "PEP", "F", "PHM", "FRO", "FCX", "PL", "FLR", "FIS", "PM",
+    "HALO", "HUT", "HD", "PFE", "HIMS", "SPCX", "CRCL"
 ]
 MFI_PERIOD = 14          # MFI 기간
 MFI_THRESHOLD = 30       # 이 값 이하만 알림
 DATA_PERIOD = "2y"       # 조회 기간
 SEND_WHEN_EMPTY = True   # 조건 만족 종목이 없어도 "없음" 메시지 전송
 # ---------------------------------------------------------------
-
 
 def calc_mfi(df: pd.DataFrame, period: int = 14) -> pd.Series:
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
