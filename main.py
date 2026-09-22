@@ -1,5 +1,5 @@
 """
-주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (종가 표기 제외 버전)
+주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (30 이하 하이라이트)
 """
 
 import os
@@ -38,10 +38,8 @@ def convert_to_heikin_ashi(df: pd.DataFrame) -> pd.DataFrame:
     """일반 OHLCV 데이터를 하이킨아시(Heikin-Ashi) OHLCV로 변환"""
     ha_df = df.copy()
     
-    # HA_Close 계산
     ha_df["Close"] = (df["Open"] + df["High"] + df["Low"] + df["Close"]) / 4
 
-    # HA_Open 계산
     ha_open = [0.0] * len(df)
     ha_open[0] = (df["Open"].iloc[0] + df["Close"].iloc[0]) / 2
     
@@ -49,8 +47,6 @@ def convert_to_heikin_ashi(df: pd.DataFrame) -> pd.DataFrame:
         ha_open[i] = (ha_open[i - 1] + ha_df["Close"].iloc[i - 1]) / 2
         
     ha_df["Open"] = ha_open
-
-    # HA_High, HA_Low 계산
     ha_df["High"] = ha_df[["High", "Open", "Close"]].max(axis=1)
     ha_df["Low"] = ha_df[["Low", "Open", "Close"]].min(axis=1)
 
@@ -97,20 +93,15 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
     for ticker in tickers:
         try:
             raw_df = fetch_weekly(ticker)
-            
-            # 하이킨아시 캔들로 변환
             ha_df = convert_to_heikin_ashi(raw_df)
-            
-            # 하이킨아시 데이터 기반 MFI 계산
             mfi = calc_mfi(ha_df, MFI_PERIOD)
             
-            latest_mfi = float(mfi.iloc[-1])    # 이번주 하이킨아시 MFI
-            prev_mfi = float(mfi.iloc[-2])      # 지난주 하이킨아시 MFI
+            latest_mfi = float(mfi.iloc[-1])
+            prev_mfi = float(mfi.iloc[-2])
 
             if pd.isna(latest_mfi) or pd.isna(prev_mfi):
                 raise ValueError("MFI 계산 결과가 NaN 입니다.")
 
-            # 1. 이번주 MFI 40 이하 종목 수집
             if latest_mfi <= MFI_THRESHOLD:
                 hits.append(
                     {
@@ -119,11 +110,9 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
                         "date": raw_df.index[-1].strftime("%Y-%m-%d"),
                     }
                 )
-                # 신규 진입 (지난주 > 40 ➡️ 이번주 <= 40)
                 if prev_mfi > MFI_THRESHOLD:
                     new_entries.append(ticker)
 
-            # 2. 이탈/탈출 종목 수집 (지난주 <= 40 ➡️ 이번주 > 40)
             elif prev_mfi <= MFI_THRESHOLD and latest_mfi > MFI_THRESHOLD:
                 exited.append(ticker)
 
@@ -133,7 +122,10 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
             failed.append(ticker)
             print(f"[FAIL] {ticker:<6} 건너뜀: {e}", file=sys.stderr)
 
-    hits.sort(key=lambda x: x["mfi"])
+    hits.sort(key=lambda x: x["ticker"])
+    new_entries.sort()
+    exited.sort()
+
     return hits, new_entries, exited, failed
 
 
@@ -141,26 +133,27 @@ def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -
     if not hits and not exited:
         return f"주봉 HA-MFI({MFI_PERIOD}) {MFI_THRESHOLD} 이하인 종목이 없습니다."
 
-    lines = [f"📉 주봉 HA-MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
+    lines = [f"📉 <b>주봉 HA-MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)</b>", ""]
     
-    # 종가 없이 MFI 수치만 표기
+    # MFI 30 이하인 경우 <code> 태그로 수치 강조
     for h in hits:
-        lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f}")
+        if h['mfi'] <= 30:
+            lines.append(f"• {h['ticker']}: MFI <code>{h['mfi']:.1f}</code>")
+        else:
+            lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f}")
 
     lines.append("\n----------------------------------")
     
-    # 🆕 이번 주 신규 진입 종목
     if new_entries:
-        lines.append(f"🆕 새로 추가된 종목 ({len(new_entries)}개):")
+        lines.append(f"🆕 <b>새로 추가된 종목 ({len(new_entries)}개):</b>")
         lines.append("• " + ", ".join(new_entries))
     else:
         lines.append("🆕 새로 추가된 종목: 없음")
 
     lines.append("")
 
-    # 🚪 이번 주 제외/탈출 종목
     if exited:
-        lines.append(f"🚪 목록에서 이탈한 종목 ({len(exited)}개):")
+        lines.append(f"🚪 <b>목록에서 이탈한 종목 ({len(exited)}개):</b>")
         lines.append("• " + ", ".join(exited))
     else:
         lines.append("🚪 목록에서 이탈한 종목: 없음")
@@ -175,8 +168,9 @@ def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -
 
 def send_telegram(token: str, chat_id: str, text: str) -> None:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
+    # parse_mode를 HTML로 설정
     resp = requests.post(
-        url, data={"chat_id": chat_id, "text": text}, timeout=15
+        url, data={"chat_id": chat_id, "text": text, "parse_mode": "HTML"}, timeout=15
     )
     resp.raise_for_status()
 
