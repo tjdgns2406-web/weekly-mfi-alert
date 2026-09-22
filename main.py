@@ -1,5 +1,8 @@
 """
-주봉 하이킨아시 MFI(14) 스크리너 -> 텔레그램 알림 (💹/🔻 이모지 반영 버전)
+주봉 하이킨아시 MFI 스크리너 -> 텔레그램 알림
+- 기본 종목: MFI(14)
+- 예외 종목(13개): MFI(11) 적용
+- 메시지 출력: 💹(상승) / 🔻(하락) 및 종목별 MFI 기간 표기
 """
 
 import os
@@ -35,11 +38,23 @@ TICKERS = [
     "WM", "WMT", "WULF", "XLC", "XLE", "XLF", "XLK", "XLY", "XOM"
 ]
 
-MFI_PERIOD = 14          # MFI 기간
+# MFI(11) 예외 적용 종목 목록
+MFI_11_TICKERS = {
+    "VIG", "VYM", "RDVY", "DGRO", "DIVB", "SCHD", "DIVO",
+    "SNDK", "MU", "GEV", "AMD", "VLO", "ABNB"
+}
+
+DEFAULT_MFI_PERIOD = 14  # 기본 MFI 기간
+ALT_MFI_PERIOD = 11      # 예외 MFI 기간
 MFI_THRESHOLD = 40       # 이 값 이하만 알림
 DATA_PERIOD = "2y"       # 데이터 조회 기간
 SEND_WHEN_EMPTY = True   # 조건 만족 종목이 없어도 메시지 전송
 # ---------------------------------------------------------------
+
+
+def get_mfi_period(ticker: str) -> int:
+    """종목별 MFI 기간 반환 (예외 종목 11, 기본 종목 14)"""
+    return ALT_MFI_PERIOD if ticker in MFI_11_TICKERS else DEFAULT_MFI_PERIOD
 
 
 def convert_to_heikin_ashi(df: pd.DataFrame) -> pd.DataFrame:
@@ -61,7 +76,7 @@ def convert_to_heikin_ashi(df: pd.DataFrame) -> pd.DataFrame:
     return ha_df
 
 
-def calc_mfi(df: pd.DataFrame, period: int = 14) -> pd.Series:
+def calc_mfi(df: pd.DataFrame, period: int) -> pd.Series:
     """MFI(Money Flow Index) 계산"""
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
     mf = tp * df["Volume"]
@@ -79,7 +94,7 @@ def calc_mfi(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return mfi
 
 
-def fetch_weekly(ticker: str) -> pd.DataFrame:
+def fetch_weekly(ticker: str, period: int) -> pd.DataFrame:
     df = yf.Ticker(ticker).history(
         period=DATA_PERIOD, interval="1wk", auto_adjust=False
     )
@@ -87,7 +102,7 @@ def fetch_weekly(ticker: str) -> pd.DataFrame:
         raise ValueError("데이터가 비어 있습니다.")
 
     df = df.dropna(subset=["Open", "High", "Low", "Close", "Volume"])
-    if len(df) < MFI_PERIOD + 2:
+    if len(df) < period + 2:
         raise ValueError(f"데이터 부족 ({len(df)}개)")
     return df
 
@@ -100,9 +115,12 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
 
     for ticker in tickers:
         try:
-            raw_df = fetch_weekly(ticker)
+            # 종목별 MFI 기간 결정 (11 또는 14)
+            mfi_period = get_mfi_period(ticker)
+            
+            raw_df = fetch_weekly(ticker, mfi_period)
             ha_df = convert_to_heikin_ashi(raw_df)
-            mfi = calc_mfi(ha_df, MFI_PERIOD)
+            mfi = calc_mfi(ha_df, mfi_period)
             
             latest_mfi = float(mfi.iloc[-1])
             prev_mfi = float(mfi.iloc[-2])
@@ -116,6 +134,7 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
                         "ticker": ticker,
                         "mfi": latest_mfi,
                         "prev_mfi": prev_mfi,
+                        "period": mfi_period,
                         "date": raw_df.index[-1].strftime("%Y-%m-%d"),
                     }
                 )
@@ -125,7 +144,7 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
             elif prev_mfi <= MFI_THRESHOLD and latest_mfi > MFI_THRESHOLD:
                 exited.append(ticker)
 
-            print(f"[OK]   {ticker:<6} HA MFI 이번주: {latest_mfi:6.2f} | 지난주: {prev_mfi:6.2f}")
+            print(f"[OK]   {ticker:<6} (MFI {mfi_period}) 이번주: {latest_mfi:6.2f} | 지난주: {prev_mfi:6.2f}")
 
         except Exception as e:
             failed.append(ticker)
@@ -140,11 +159,11 @@ def screen(tickers: list[str]) -> tuple[list[dict], list[str], list[str], list[s
 
 def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -> str:
     if not hits and not exited:
-        return f"주봉 HA-MFI({MFI_PERIOD}) {MFI_THRESHOLD} 이하인 종목이 없습니다."
+        return f"주봉 HA-MFI ≤ {MFI_THRESHOLD} 인 종목이 없습니다."
 
-    lines = [f"📉 주봉 HA-MFI({MFI_PERIOD}) ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
+    lines = [f"📉 주봉 HA-MFI ≤ {MFI_THRESHOLD} 종목 ({len(hits)}개)", ""]
     
-    # 2번 옵션 적용 (상승: 💹, 하락: 🔻)
+    # 종목별 MFI 수치 및 개별 기간(11/14)과 방향성 이모지(💹/🔻) 표기
     for h in hits:
         if h['mfi'] > h['prev_mfi']:
             symbol = "💹"
@@ -153,7 +172,7 @@ def build_message(hits: list[dict], new_entries: list[str], exited: list[str]) -
         else:
             symbol = ""
             
-        lines.append(f"• {h['ticker']}: MFI {h['mfi']:.1f} {symbol}".strip())
+        lines.append(f"• {h['ticker']}: MFI({h['period']}) {h['mfi']:.1f} {symbol}".strip())
 
     lines.append("\n----------------------------------")
     
