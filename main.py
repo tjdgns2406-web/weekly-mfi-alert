@@ -137,7 +137,7 @@ def evaluate(daily: pd.DataFrame, cutoff, alt: bool):
 
 
 def screen(data, symbols, today):
-    hits, new_entries, exited, failed = [], [], [], []
+    hits, new_entries, failed = [], [], []
 
     for t, sym in symbols.items():
         try:
@@ -154,15 +154,12 @@ def screen(data, symbols, today):
             if now is None:
                 raise ValueError("MFI 계산 불가")
 
-            prev_ok = bool(prev and prev["ok"])
             if now["ok"]:
                 now["ticker"] = t
                 now["prev_d"] = prev["d"] if prev else now["d"]
                 hits.append(now)
-                if not prev_ok:
+                if not (prev and prev["ok"]):
                     new_entries.append(t)
-            elif prev_ok:
-                exited.append(t)
 
             print(f"[OK]   {t:<6} 일 {now['d']:5.1f} | 주 {now['w']:5.1f} | 월 {now['m']:5.1f}")
         except Exception as e:
@@ -171,14 +168,13 @@ def screen(data, symbols, today):
 
     hits.sort(key=lambda x: x["ticker"])
     new_entries.sort()
-    exited.sort()
-    return hits, new_entries, exited, failed
+    return hits, new_entries, failed
 
 
-def build_message(hits, new_entries, exited, kst_now) -> str:
+def build_message(hits, new_entries) -> str:
     title = (f"일봉≤{DAILY_THRESHOLD} / 주봉≤{WEEKLY_THRESHOLD} / "
              f"월봉≤{MONTHLY_THRESHOLD}")
-    if not hits and not exited:
+    if not hits:
         return f"📉 HA-MFI 3중 조건 ({title})\n충족 종목이 없습니다."
 
     lines = [f"📉 HA-MFI 3중 조건 ({title}) - {len(hits)}개", ""]
@@ -200,16 +196,9 @@ def build_message(hits, new_entries, exited, kst_now) -> str:
         lines.append("• " + ", ".join(new_entries))
     else:
         lines.append("🆕 새로 추가된 종목: 없음")
-    lines.append("")
-    if exited:
-        lines.append(f"🚪 목록에서 이탈한 종목 ({len(exited)}개):")
-        lines.append("• " + ", ".join(exited))
-    else:
-        lines.append("🚪 목록에서 이탈한 종목: 없음")
     lines.append("----------------------------------")
 
-    date_str = hits[0]["date"] if hits else "최신"
-    lines.append(f"기준 일봉: {date_str}")
+    lines.append(f"기준 일봉: {hits[0]['date']}")
     return "\n".join(lines)
 
 
@@ -245,16 +234,16 @@ def main() -> None:
         group_by="ticker", auto_adjust=False, threads=True, progress=False,
     )
 
-    hits, new_entries, exited, failed = screen(data, symbols, today)
+    hits, new_entries, failed = screen(data, symbols, today)
 
     if failed:
         print(f"\n수집 실패 종목: {', '.join(failed)}", file=sys.stderr)
 
-    if not hits and not exited and not SEND_WHEN_EMPTY:
+    if not hits and not SEND_WHEN_EMPTY:
         print("\n조건 충족 종목이 없어 메시지를 보내지 않습니다.")
         return
 
-    message = build_message(hits, new_entries, exited, kst_now)
+    message = build_message(hits, new_entries)
     if failed:
         message += f"\n\n⚠️ 데이터 조회 실패: {', '.join(failed)}"
     try:
