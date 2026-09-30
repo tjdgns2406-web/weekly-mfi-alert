@@ -2,14 +2,13 @@ name: Weekly MFI Alert Bot
 
 on:
   schedule:
-    # UTC 기준 금요일 02:00 = 한국 시간(KST) 토요일 오전 11:00
-    - cron: '0 2 * * 6'
-  workflow_dispatch: # 수동 테스트용 버튼 생성
+    # UTC 월~금 22:30 = KST 화~토 07:30 (미국장 마감 후, 한국장 마감 후)
+    - cron: '30 22 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   run-mfi-bot:
     runs-on: ubuntu-latest
-
     steps:
       - name: Code Checkout
         uses: actions/checkout@v4
@@ -17,11 +16,11 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
-          pip install yfinance pandas requests
+          pip install --upgrade yfinance pandas requests
 
       - name: Run MFI Script
         env:
