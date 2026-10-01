@@ -2,7 +2,7 @@
 MFI 3중 조건 스크리너 -> 텔레그램 알림 (하이킨아시 기준)
 - 일봉 MFI(14) <= 30
 - 주봉 MFI(14, 특정 종목 11) <= 30  (마감된 직전 주봉)
-- 월봉 MFI(14, 특정 종목 11) <= 60  (마감된 직전 월봉)
+- 월봉 MFI(14, 특정 종목 11) <= 50  (마감된 직전 월봉)
 - 세 조건 모두 충족(AND) 시 이름순 알림
 """
 
@@ -53,7 +53,7 @@ DEFAULT_MFI_PERIOD = 14
 ALT_MFI_PERIOD = 11      # 주봉/월봉 예외 종목만
 DAILY_THRESHOLD = 30
 WEEKLY_THRESHOLD = 30
-MONTHLY_THRESHOLD = 60
+MONTHLY_THRESHOLD = 50
 DATA_PERIOD = "10y"
 SEND_WHEN_EMPTY = True
 # ---------------------------------------------------------------
