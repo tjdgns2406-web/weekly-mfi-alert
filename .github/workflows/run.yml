@@ -20,7 +20,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade yfinance pandas requests
+          pip install --upgrade yfinance pandas requests lxml
 
       - name: Run MFI Script
         env:
