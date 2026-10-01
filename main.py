@@ -5,6 +5,7 @@ MFI 3중 조건 스크리너 -> 텔레그램 알림 (하이킨아시 기준)
 - 월봉 MFI(14, 특정 종목 11) <= 50  (마감된 직전 월봉)
 - 월봉 데이터가 부족한 신규 상장 종목은 월봉 조건을 생략(N/A 표시)
 - 세 조건 모두 충족(AND) 시 이름순 알림, 전 거래일 대비 신규/이탈 표시
+- 한 메시지 안에 미국장 / 국장(dc형) 구역을 나눠서 전송
 """
 
 import os
@@ -151,6 +152,11 @@ def label(t: str) -> str:
     return f"{name}({code})" if name else code
 
 
+def is_kr(t: str) -> bool:
+    """국내 종목(.KS) 여부"""
+    return t.endswith(".KS")
+
+
 USE_HEIKIN_ASHI = True   # False로 바꾸면 일반 캔들로 계산
 DEFAULT_MFI_PERIOD = 14
 ALT_MFI_PERIOD = 11      # 주봉/월봉 예외 종목만
@@ -273,49 +279,59 @@ def screen(data, symbols, today):
             failed.append(t)
             print(f"[FAIL] {t:<10} 건너뜀: {e}", file=sys.stderr)
 
-    # 표시되는 이름 기준으로 정렬 (가나다/ABC순)
+    # 표시되는 이름 기준으로 정렬
     hits.sort(key=lambda x: label(x["ticker"]))
     new_entries.sort(key=label)
     exited.sort(key=label)
     return hits, new_entries, exited, failed
 
 
-def build_message(hits, new_entries, exited) -> str:
-    title = (f"일봉<={DAILY_THRESHOLD} / 주봉<={WEEKLY_THRESHOLD} / "
-             f"월봉<={MONTHLY_THRESHOLD}")
+def build_section(market, hits, new_entries, exited, failed) -> str:
+    """한 시장(미국장 또는 국장)의 구역 텍스트"""
     if not hits and not exited:
-        return f"[📉MFI 3중 조건] ({title})\n충족 종목이 없습니다."
-
-    lines = [f"[📉MFI 3중 조건] ({title}) - {len(hits)}개", ""]
-    for h in hits:
-        period = f" (주·월 MFI{h['p']})" if h["p"] == ALT_MFI_PERIOD else ""
-        m_txt = "N/A(데이터 부족)" if h["m"] is None else f"{h['m']:.1f}"
-        lines.append(
-            f"- {label(h['ticker'])}: 일봉 {h['d']:.1f} | 주봉 {h['w']:.1f} | 월봉 {m_txt}{period}"
-        )
-
-    lines.append("\n----------------------------------")
-    if new_entries:
-        lines.append(f"🆕 새로 추가된 종목 ({len(new_entries)}개):")
-        lines.append("- " + ", ".join(label(x) for x in new_entries))
+        text = f"■ {market}\n충족 종목이 없습니다."
     else:
-        lines.append("🆕 새로 추가된 종목: 없음")
-    lines.append("")
-    if exited:
-        lines.append(f"💹 목록에서 이탈한 종목 ({len(exited)}개):")
-        lines.append("- " + ", ".join(label(x) for x in exited))
-    else:
-        lines.append("💹 목록에서 이탈한 종목: 없음")
-    lines.append("----------------------------------")
+        lines = [f"■ {market} - {len(hits)}개"]
+        for h in hits:
+            period = f" (MFI{h['p']})" if h["p"] == ALT_MFI_PERIOD else ""
+            m_txt = "N/A" if h["m"] is None else f"{h['m']:.1f}"
+            lines.append(
+                f"- {label(h['ticker'])}: 일봉{h['d']:.1f}/주{h['w']:.1f}/월{m_txt}{period}"
+            )
 
-    date_str = hits[0]["date"] if hits else "최신"
-    lines.append(f"기준 일봉: {date_str}")
-    return "\n".join(lines)
+        lines.append("")
+        if new_entries:
+            lines.append(f"🆕 새로 추가된 종목 ({len(new_entries)}개):")
+            lines.append("- " + ", ".join(label(x) for x in new_entries))
+        else:
+            lines.append("🆕 새로 추가된 종목: 없음")
+        if exited:
+            lines.append(f"💹 목록에서 이탈한 종목 ({len(exited)}개):")
+            lines.append("- " + ", ".join(label(x) for x in exited))
+        else:
+            lines.append("💹 목록에서 이탈한 종목: 없음")
+
+        if hits:
+            lines.append(f"기준 일봉: {hits[0]['date']}")
+        text = "\n".join(lines)
+
+    if failed:
+        text += f"\n⚠️ 데이터 조회 실패: {', '.join(label(x) for x in failed)}"
+    return text
+
+
+def build_message(sections) -> str:
+    """제목 1번 + 시장별 구역을 하나의 메시지로 합침"""
+    title = (f"[📉MFI 3중 조건]\n"
+             f"(일봉<={DAILY_THRESHOLD} / 주봉<={WEEKLY_THRESHOLD} / "
+             f"월봉<={MONTHLY_THRESHOLD})")
+    divider = "\n\n==================\n\n"
+    return title + "\n\n" + divider.join(sections)
 
 
 def send_telegram(token: str, chat_id: str, text: str) -> None:
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    # 4096자 제한 대비 분할 전송
+    # 4096자 제한 대비 분할 전송 (길어질 때만 자동으로 나뉨)
     chunks, cur = [], ""
     for line in text.split("\n"):
         if len(cur) + len(line) + 1 > 3800:
@@ -350,13 +366,27 @@ def main() -> None:
     if failed:
         print(f"\n수집 실패 종목: {', '.join(failed)}", file=sys.stderr)
 
-    if not hits and not exited and not SEND_WHEN_EMPTY:
+    # 시장별 구역 만들기 (미국장 -> 국장 순서)
+    markets = [
+        ("미국장", lambda t: not is_kr(t)),
+        ("국장 (dc형)", is_kr),
+    ]
+    sections = []
+    any_content = False
+    for name, cond in markets:
+        m_hits = [h for h in hits if cond(h["ticker"])]
+        m_new = [t for t in new_entries if cond(t)]
+        m_exit = [t for t in exited if cond(t)]
+        m_fail = [t for t in failed if cond(t)]
+        if m_hits or m_exit:
+            any_content = True
+        sections.append(build_section(name, m_hits, m_new, m_exit, m_fail))
+
+    if not any_content and not SEND_WHEN_EMPTY:
         print("\n조건 충족 종목이 없어 메시지를 보내지 않습니다.")
         return
 
-    message = build_message(hits, new_entries, exited)
-    if failed:
-        message += f"\n\n⚠️ 데이터 조회 실패: {', '.join(label(x) for x in failed)}"
+    message = build_message(sections)
     try:
         send_telegram(token, chat_id, message)
         print("\n텔레그램 전송 완료:\n" + message)
