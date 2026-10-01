@@ -6,12 +6,14 @@ MFI 3중 조건 스크리너 -> 텔레그램 알림 (하이킨아시 기준)
 - 월봉 데이터가 부족한 신규 상장 종목은 월봉 조건을 생략(N/A 표시)
 - 세 조건 모두 충족(AND) 시 이름순 알림, 전 거래일 대비 신규/이탈 표시
 - 한 메시지 안에 미국장 / 국장(dc형) 구역을 나눠서 전송
+- 장중 봉 제외: 시장별 마감 확정 시각 이후의 봉만 사용
 """
 
 import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -157,6 +159,24 @@ def is_kr(t: str) -> bool:
     return t.endswith(".KS")
 
 
+# 장중 봉 제외용: 이 시각 이후에만 그날 봉을 '마감 확정'으로 인정 (현지 시각)
+US_CONFIRM_HOUR, US_CONFIRM_MIN = 17, 0    # 뉴욕 17:00 (마감 16:00 + 1시간)
+KR_CONFIRM_HOUR, KR_CONFIRM_MIN = 20, 0    # 한국 20:00 (마감 15:30 + 4.5시간)
+
+
+def market_cutoff(t: str, now_utc) -> pd.Timestamp:
+    """이 날짜 '이전'의 봉만 마감 확정으로 인정."""
+    if is_kr(t):
+        tz = ZoneInfo("Asia/Seoul")
+        confirm = KR_CONFIRM_HOUR * 60 + KR_CONFIRM_MIN
+    else:
+        tz = ZoneInfo("America/New_York")
+        confirm = US_CONFIRM_HOUR * 60 + US_CONFIRM_MIN
+    local = now_utc.astimezone(tz)
+    closed = local.hour * 60 + local.minute >= confirm
+    return pd.Timestamp(local.date() + timedelta(days=1 if closed else 0))
+
+
 USE_HEIKIN_ASHI = True   # False로 바꾸면 일반 캔들로 계산
 DEFAULT_MFI_PERIOD = 14
 ALT_MFI_PERIOD = 11      # 주봉/월봉 예외 종목만
@@ -246,7 +266,7 @@ def evaluate(daily: pd.DataFrame, cutoff, alt: bool):
             "date": df.index[-1].strftime("%Y-%m-%d")}
 
 
-def screen(data, symbols, today):
+def screen(data, symbols, now_utc):
     hits, new_entries, exited, failed = [], [], [], []
 
     for t, sym in symbols.items():
@@ -254,12 +274,13 @@ def screen(data, symbols, today):
             raw = data[sym][["Open", "High", "Low", "Close", "Volume"]]
             daily = raw.dropna(subset=["Close"]).copy()
             daily.index = pd.to_datetime(daily.index).tz_localize(None).normalize()
-            daily = daily[daily.index < today]
+            cutoff = market_cutoff(t, now_utc)   # 장중 봉 제외 기준일
+            daily = daily[daily.index < cutoff]
             if len(daily) < 60:
                 raise ValueError("데이터 부족")
 
             alt = t in MFI_11_TICKERS
-            now = evaluate(daily, today, alt)
+            now = evaluate(daily, cutoff, alt)
             prev = evaluate(daily, daily.index[-1], alt)  # 전 거래일 기준
             if now is None:
                 raise ValueError("MFI 계산 불가")
@@ -274,7 +295,7 @@ def screen(data, symbols, today):
                 exited.append(t)
 
             m_txt = "N/A" if now["m"] is None else f"{now['m']:.1f}"
-            print(f"[OK]   {t:<10} 일봉 {now['d']:5.1f} | 주봉 {now['w']:5.1f} | 월봉 {m_txt}")
+            print(f"[OK]   {t:<10} {now['date']} 일봉 {now['d']:5.1f} | 주봉 {now['w']:5.1f} | 월봉 {m_txt}")
         except Exception as e:
             failed.append(t)
             print(f"[FAIL] {t:<10} 건너뜀: {e}", file=sys.stderr)
@@ -352,8 +373,7 @@ def main() -> None:
         print("환경변수 TELEGRAM_TOKEN, CHAT_ID 미설정", file=sys.stderr)
         sys.exit(1)
 
-    kst_now = datetime.now(timezone.utc) + timedelta(hours=9)
-    today = pd.Timestamp(kst_now.date())
+    now_utc = datetime.now(timezone.utc)
 
     symbols = {t: yf_symbol(t) for t in TICKERS}
     data = yf.download(
@@ -361,7 +381,7 @@ def main() -> None:
         group_by="ticker", auto_adjust=False, threads=True, progress=False,
     )
 
-    hits, new_entries, exited, failed = screen(data, symbols, today)
+    hits, new_entries, exited, failed = screen(data, symbols, now_utc)
 
     if failed:
         print(f"\n수집 실패 종목: {', '.join(failed)}", file=sys.stderr)
