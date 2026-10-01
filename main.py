@@ -7,12 +7,14 @@ MFI 3중 조건 스크리너 -> 텔레그램 알림 (하이킨아시 기준)
 - 세 조건 모두 충족(AND) 시 이름순 알림, 전 거래일 대비 신규/이탈 표시
 - 한 메시지 안에 미국장 / 국장(dc형) 구역을 나눠서 전송
 - 장중 봉 제외: 시장별 마감 확정 시각 이후의 봉만 사용
+- 메시지 상단에 S&P500 상승/보합/하락 종목 수 표시
 """
 
 import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -175,6 +177,28 @@ def market_cutoff(t: str, now_utc) -> pd.Timestamp:
     local = now_utc.astimezone(tz)
     closed = local.hour * 60 + local.minute >= confirm
     return pd.Timestamp(local.date() + timedelta(days=1 if closed else 0))
+
+
+def get_sp500_breadth(now_utc):
+    """S&P500 상승/보합/하락 종목 수 (미국 마감 확정 봉 기준). 실패하면 None"""
+    try:
+        r = requests.get(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+        r.raise_for_status()
+        table = pd.read_html(StringIO(r.text))[0]
+        tickers = [s.replace(".", "-") for s in table["Symbol"].astype(str)]
+        px = yf.download(tickers, period="10d", interval="1d",
+                         auto_adjust=False, threads=True, progress=False)["Close"]
+        px.index = pd.to_datetime(px.index).tz_localize(None).normalize()
+        px = px[px.index < market_cutoff("US", now_utc)]
+        chg = (px.iloc[-1] - px.iloc[-2]).round(2).dropna()
+        up, down = int((chg > 0).sum()), int((chg < 0).sum())
+        flat = int((chg == 0).sum())
+        return up, flat, down, px.index[-1].strftime("%Y-%m-%d")
+    except Exception as e:
+        print(f"[WARN] S&P500 상승/하락 집계 실패: {e}", file=sys.stderr)
+        return None
 
 
 USE_HEIKIN_ASHI = True   # False로 바꾸면 일반 캔들로 계산
@@ -341,11 +365,14 @@ def build_section(market, hits, new_entries, exited, failed) -> str:
     return text
 
 
-def build_message(sections) -> str:
+def build_message(sections, breadth=None) -> str:
     """제목 1번 + 시장별 구역을 하나의 메시지로 합침"""
     title = (f"[📉MFI 3중 조건]\n"
              f"(일봉<={DAILY_THRESHOLD} / 주봉<={WEEKLY_THRESHOLD} / "
              f"월봉<={MONTHLY_THRESHOLD})")
+    if breadth:
+        up, flat, down, d = breadth
+        title += f"\nS&P500 상승{up}/보합{flat}/하락{down} ({d})"
     divider = "\n\n==================\n\n"
     return title + "\n\n" + divider.join(sections)
 
@@ -382,6 +409,7 @@ def main() -> None:
     )
 
     hits, new_entries, exited, failed = screen(data, symbols, now_utc)
+    breadth = get_sp500_breadth(now_utc)
 
     if failed:
         print(f"\n수집 실패 종목: {', '.join(failed)}", file=sys.stderr)
@@ -406,7 +434,7 @@ def main() -> None:
         print("\n조건 충족 종목이 없어 메시지를 보내지 않습니다.")
         return
 
-    message = build_message(sections)
+    message = build_message(sections, breadth)
     try:
         send_telegram(token, chat_id, message)
         print("\n텔레그램 전송 완료:\n" + message)
