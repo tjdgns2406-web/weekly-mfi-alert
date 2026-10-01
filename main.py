@@ -106,7 +106,7 @@ def resample_ohlcv(df: pd.DataFrame, rule: str) -> pd.DataFrame:
 
 
 def last_mfi(df: pd.DataFrame, period: int):
-    if len(df) < period + 3:
+    if len(df) < period + 1:
         return None
     if USE_HEIKIN_ASHI:
         df = convert_to_heikin_ashi(df)
