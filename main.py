@@ -4,7 +4,7 @@ MFI 3중 조건 스크리너 -> 텔레그램 알림 (하이킨아시 기준)
 - 주봉 MFI(14, 특정 종목 11) <= 30  (마감된 직전 주봉)
 - 월봉 MFI(14, 특정 종목 11) <= 50  (마감된 직전 월봉)
 - 월봉 데이터가 부족한 신규 상장 종목은 월봉 조건을 생략(N/A 표시)
-- 세 조건 모두 충족(AND) 시 이름순 알림
+- 세 조건 모두 충족(AND) 시 이름순 알림, 전 거래일 대비 신규/이탈 표시
 """
 
 import os
@@ -25,7 +25,7 @@ TICKERS = [
     "BOX", "BRK.B", "BWXT", "CARR", "CCJ", "CEG", "CGNX", "CIFR", "CLS",
     "CLSK", "COHR", "COIN", "COST", "CPER", "CRCL", "CRDO", "CRM", "CRSP", "CRWV",
     "DAL", "DDOG", "DE", "DELL", "DFH", "DFEN", "DGRO", "DIS", "DIVB", "DIVO",
-    "DRAM", "DVA", "EEM", "ELF", "EMR", "ENTG", "ETU", "EWL", "F", "FAS",
+    "DVA", "EEM", "ELF", "EMR", "ENTG", "ETU", "EWL", "F", "FAS",
     "FCX", "FIS", "FLR", "FRO", "GD", "GEV", "GLW", "GME", "GOOG", "GOOGL",
     "HALO", "HD", "HIMS", "HOOD", "HUT", "IBM", "IEMG", "IGV", "ILMN", "INOD",
     "INTC", "INTU", "IONQ", "IREN", "IWB", "JCI", "JNJ", "JOBY", "JPM", "KO",
@@ -35,7 +35,7 @@ TICKERS = [
     "O", "OKLO", "ORCL", "OXY", "PANW", "PATH", "PEP", "PFE", "PG", "PHM",
     "PL", "PLTR", "PM", "PPA", "QCOM", "QLD", "QQQ", "QBTS", "QUBT", "RCAT",
     "RDDT", "RDW", "RDVY", "RGTI", "RKLB", "ROBO", "SCHD", "SMCI", "SMMT", "SMR",
-    "SNDK", "SNOW", "SNPS", "SO", "SOFI", "SONY", "SOUN", "SOXL", "SOXX", "SPCX",
+    "SNDK", "SNOW", "SNPS", "SO", "SOFI", "SONY", "SOUN", "SOXL", "SOXX",
     "SPOT", "STRL", "STX", "SYM", "T", "TCOM", "TE",
     "TEM", "TER", "TFC", "TGTX", "TM", "TME", "TOL", "TQQQ", "TRIN", "TSLA",
     "TSEM", "TT", "TXN", "U", "UBER", "UCO", "UGL", "ULTA", "UNH", "UPST",
@@ -139,7 +139,7 @@ def evaluate(daily: pd.DataFrame, cutoff, alt: bool):
 
 
 def screen(data, symbols, today):
-    hits, new_entries, failed = [], [], []
+    hits, new_entries, exited, failed = [], [], [], []
 
     for t, sym in symbols.items():
         try:
@@ -156,12 +156,14 @@ def screen(data, symbols, today):
             if now is None:
                 raise ValueError("MFI 계산 불가")
 
+            prev_ok = bool(prev and prev["ok"])
             if now["ok"]:
                 now["ticker"] = t
-                now["prev_d"] = prev["d"] if prev else now["d"]
                 hits.append(now)
-                if not (prev and prev["ok"]):
+                if not prev_ok:
                     new_entries.append(t)
+            elif prev_ok:
+                exited.append(t)
 
             m_txt = "N/A" if now["m"] is None else f"{now['m']:.1f}"
             print(f"[OK]   {t:<6} 일 {now['d']:5.1f} | 주 {now['w']:5.1f} | 월 {m_txt}")
@@ -171,38 +173,40 @@ def screen(data, symbols, today):
 
     hits.sort(key=lambda x: x["ticker"])
     new_entries.sort()
-    return hits, new_entries, failed
+    exited.sort()
+    return hits, new_entries, exited, failed
 
 
-def build_message(hits, new_entries) -> str:
-    title = (f"일봉≤{DAILY_THRESHOLD} / 주봉≤{WEEKLY_THRESHOLD} / "
-             f"월봉≤{MONTHLY_THRESHOLD}")
-    if not hits:
-        return f"📉 HA-MFI 3중 조건 ({title})\n충족 종목이 없습니다."
+def build_message(hits, new_entries, exited) -> str:
+    title = (f"일봉<={DAILY_THRESHOLD} / 주봉<={WEEKLY_THRESHOLD} / "
+             f"월봉<={MONTHLY_THRESHOLD}")
+    if not hits and not exited:
+        return f"[HA-MFI 3중 조건] ({title})\n충족 종목이 없습니다."
 
-    lines = [f"📉 HA-MFI 3중 조건 ({title}) - {len(hits)}개", ""]
+    lines = [f"[HA-MFI 3중 조건] ({title}) - {len(hits)}개", ""]
     for h in hits:
-        if h["d"] > h["prev_d"]:
-            symbol = "💹"
-        elif h["d"] < h["prev_d"]:
-            symbol = "🔻"
-        else:
-            symbol = ""
         period = f" (주·월 MFI{h['p']})" if h["p"] == ALT_MFI_PERIOD else ""
         m_txt = "N/A(데이터 부족)" if h["m"] is None else f"{h['m']:.1f}"
         lines.append(
-            f"• {h['ticker']}: 일 {h['d']:.1f} | 주 {h['w']:.1f} | 월 {m_txt} {symbol}{period}".strip()
+            f"- {h['ticker']}: 일 {h['d']:.1f} | 주 {h['w']:.1f} | 월 {m_txt}{period}"
         )
 
     lines.append("\n----------------------------------")
     if new_entries:
-        lines.append(f"🆕 새로 추가된 종목 ({len(new_entries)}개):")
-        lines.append("• " + ", ".join(new_entries))
+        lines.append(f"[신규] 새로 추가된 종목 ({len(new_entries)}개):")
+        lines.append("- " + ", ".join(new_entries))
     else:
-        lines.append("🆕 새로 추가된 종목: 없음")
+        lines.append("[신규] 새로 추가된 종목: 없음")
+    lines.append("")
+    if exited:
+        lines.append(f"[이탈] 목록에서 이탈한 종목 ({len(exited)}개):")
+        lines.append("- " + ", ".join(exited))
+    else:
+        lines.append("[이탈] 목록에서 이탈한 종목: 없음")
     lines.append("----------------------------------")
 
-    lines.append(f"기준 일봉: {hits[0]['date']}")
+    date_str = hits[0]["date"] if hits else "최신"
+    lines.append(f"기준 일봉: {date_str}")
     return "\n".join(lines)
 
 
@@ -238,18 +242,18 @@ def main() -> None:
         group_by="ticker", auto_adjust=False, threads=True, progress=False,
     )
 
-    hits, new_entries, failed = screen(data, symbols, today)
+    hits, new_entries, exited, failed = screen(data, symbols, today)
 
     if failed:
         print(f"\n수집 실패 종목: {', '.join(failed)}", file=sys.stderr)
 
-    if not hits and not SEND_WHEN_EMPTY:
+    if not hits and not exited and not SEND_WHEN_EMPTY:
         print("\n조건 충족 종목이 없어 메시지를 보내지 않습니다.")
         return
 
-    message = build_message(hits, new_entries)
+    message = build_message(hits, new_entries, exited)
     if failed:
-        message += f"\n\n⚠️ 데이터 조회 실패: {', '.join(failed)}"
+        message += f"\n\n[주의] 데이터 조회 실패: {', '.join(failed)}"
     try:
         send_telegram(token, chat_id, message)
         print("\n텔레그램 전송 완료:\n" + message)
