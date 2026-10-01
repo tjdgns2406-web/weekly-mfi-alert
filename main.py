@@ -247,4 +247,15 @@ def main() -> None:
         print("\n조건 충족 종목이 없어 메시지를 보내지 않습니다.")
         return
 
-    message =
+    message = build_message(hits, new_entries)
+    if failed:
+        message += f"\n\n⚠️ 데이터 조회 실패: {', '.join(failed)}"
+    try:
+        send_telegram(token, chat_id, message)
+        print("\n텔레그램 전송 완료:\n" + message)
+    except Exception as e:
+        print(f"\n텔레그램 전송 실패: {e}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
