@@ -373,6 +373,7 @@ def build_message(sections, breadth=None) -> str:
     if breadth:
         up, flat, down, d = breadth
         title += f"\nS&P500 🟢상승{up}/⚪보합{flat}/🔴하락{down} ({d})"
+    title += "\n<매매전략-매일모으기/양전시종료/10%매도>"
     divider = "\n\n==================\n\n"
     return title + "\n\n" + divider.join(sections)
 
