@@ -2,7 +2,7 @@
 MFI 3중 조건 스크리너 -> 텔레그램 알림 (하이킨아시 기준)
 - 일봉 MFI(14) <= 30
 - 주봉 MFI(14, 특정 종목 11) <= 30  (마감된 직전 주봉)
-- 월봉 MFI(14, 특정 종목 11) <= 50  (마감된 직전 월봉)
+- 월봉 MFI(14, 특정 종목 11) <= 60  (마감된 직전 월봉)
 - 월봉 데이터가 부족한 신규 상장 종목은 월봉 조건을 생략(N/A 표시)
 - 세 조건 모두 충족(AND) 시 이름순 알림, 전 거래일 대비 신규/이탈 표시
 - 한 메시지 안에 미국장 / 국장(dc형) 구역을 나눠서 전송
@@ -206,7 +206,7 @@ DEFAULT_MFI_PERIOD = 14
 ALT_MFI_PERIOD = 11      # 주봉/월봉 예외 종목만
 DAILY_THRESHOLD = 30
 WEEKLY_THRESHOLD = 30
-MONTHLY_THRESHOLD = 50
+MONTHLY_THRESHOLD = 60
 DATA_PERIOD = "10y"
 SEND_WHEN_EMPTY = True
 # ---------------------------------------------------------------
@@ -372,7 +372,7 @@ def build_message(sections, breadth=None) -> str:
              f"월봉<={MONTHLY_THRESHOLD})")
     if breadth:
         up, flat, down, d = breadth
-        title += f"\nS&P500 상승{up}/보합{flat}/하락{down} ({d})"
+        title += f"\nS&P500 🟢상승{up}/⚪보합{flat}/🔴하락{down} ({d})"
     divider = "\n\n==================\n\n"
     return title + "\n\n" + divider.join(sections)
 
