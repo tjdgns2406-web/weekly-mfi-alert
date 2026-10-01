@@ -181,28 +181,28 @@ def build_message(hits, new_entries, exited) -> str:
     title = (f"일봉<={DAILY_THRESHOLD} / 주봉<={WEEKLY_THRESHOLD} / "
              f"월봉<={MONTHLY_THRESHOLD}")
     if not hits and not exited:
-        return f"[HA-MFI 3중 조건] ({title})\n충족 종목이 없습니다."
+        return f"[📉MFI 3중 조건] ({title})\n충족 종목이 없습니다."
 
-    lines = [f"[HA-MFI 3중 조건] ({title}) - {len(hits)}개", ""]
+    lines = [f"[📉MFI 3중 조건] ({title}) - {len(hits)}개", ""]
     for h in hits:
         period = f" (주·월 MFI{h['p']})" if h["p"] == ALT_MFI_PERIOD else ""
         m_txt = "N/A(데이터 부족)" if h["m"] is None else f"{h['m']:.1f}"
         lines.append(
-            f"- {h['ticker']}: 일 {h['d']:.1f} | 주 {h['w']:.1f} | 월 {m_txt}{period}"
+            f"- {h['ticker']}: 일봉 {h['d']:.1f} | 주봉 {h['w']:.1f} | 월봉 {m_txt}{period}"
         )
 
     lines.append("\n----------------------------------")
     if new_entries:
-        lines.append(f"[신규] 새로 추가된 종목 ({len(new_entries)}개):")
+        lines.append(f"🆕 새로 추가된 종목 ({len(new_entries)}개):")
         lines.append("- " + ", ".join(new_entries))
     else:
-        lines.append("[신규] 새로 추가된 종목: 없음")
+        lines.append("🆕 새로 추가된 종목: 없음")
     lines.append("")
     if exited:
-        lines.append(f"[이탈] 목록에서 이탈한 종목 ({len(exited)}개):")
+        lines.append(f"💹 목록에서 이탈한 종목 ({len(exited)}개):")
         lines.append("- " + ", ".join(exited))
     else:
-        lines.append("[이탈] 목록에서 이탈한 종목: 없음")
+        lines.append("💹 목록에서 이탈한 종목: 없음")
     lines.append("----------------------------------")
 
     date_str = hits[0]["date"] if hits else "최신"
@@ -253,7 +253,7 @@ def main() -> None:
 
     message = build_message(hits, new_entries, exited)
     if failed:
-        message += f"\n\n[주의] 데이터 조회 실패: {', '.join(failed)}"
+        message += f"\n\n⚠️ 데이터 조회 실패: {', '.join(failed)}"
     try:
         send_telegram(token, chat_id, message)
         print("\n텔레그램 전송 완료:\n" + message)
