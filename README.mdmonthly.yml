@@ -1,0 +1,50 @@
+name: Monthly HA MFI Alert Bot
+
+on:
+  schedule:
+    # UTC 28~31일, 1~2일 23:00 = KST 29일~3일 08:00
+    # (월 마감 다음 날인 KST 1일 아침이 본 실행, KST 2~3일은 실패 대비 재시도)
+    # 그 외 날짜는 monthly.py가 알아서 조용히 종료함
+    - cron: '0 23 28-31,1-2 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # monthly_state.json 기록 저장용
+
+concurrency:
+  group: monthly-mfi
+  cancel-in-progress: false
+
+jobs:
+  run-monthly-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Code Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade yfinance pandas requests lxml
+
+      - name: Run Monthly Script
+        env:
+          MONTHLY_TELEGRAM_TOKEN: ${{ secrets.MONTHLY_TELEGRAM_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          MONTHLY_CHAT_ID: ${{ secrets.MONTHLY_CHAT_ID }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: python monthly.py
+
+      - name: Save state
+        run: |
+          if [ -n "$(git status --porcelain monthly_state.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add monthly_state.json
+            git commit -m "update monthly state"
+            git push
+          fi
