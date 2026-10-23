@@ -192,6 +192,8 @@ def get_sp500_breadth(now_utc):
                          auto_adjust=False, threads=True, progress=False)["Close"]
         px.index = pd.to_datetime(px.index).tz_localize(None).normalize()
         px = px[px.index < market_cutoff("US", now_utc)]
+        # 야후 데이터가 절반도 안 들어온 날짜는 제외 (일부 누락 대비)
+        px = px.dropna(thresh=int(len(px.columns) * 0.5))
         chg = (px.iloc[-1] - px.iloc[-2]).round(2).dropna()
         up, down = int((chg > 0).sum()), int((chg < 0).sum())
         flat = int((chg == 0).sum())
