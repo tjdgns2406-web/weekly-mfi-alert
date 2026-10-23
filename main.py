@@ -9,7 +9,7 @@ MFI 3중 조건 스크리너 -> 텔레그램 알림 (하이킨아시 기준)
 - 장중 봉 제외: 시장별 마감 확정 시각 이후의 봉만 사용
 - 메시지 상단에 S&P500 상승/보합/하락 종목 수 표시
 """
-
+ctions/checkout@v5
 import os
 import re
 import sys
