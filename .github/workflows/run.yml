@@ -2,8 +2,8 @@ name: Weekly MFI Alert Bot
 
 on:
   schedule:
-    # UTC 월~금 23:00 = KST 화~토 08:00
-    - cron: '0 23 * * 1-5'
+    # UTC 월~금 23:17 = KST 화~토 08:17
+    - cron: '17 23 * * 1-5'
   workflow_dispatch:
 
 jobs:
