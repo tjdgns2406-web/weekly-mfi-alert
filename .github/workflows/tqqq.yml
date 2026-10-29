@@ -1,0 +1,61 @@
+name: TQQQ Split-Buy Alert
+
+on:
+  schedule:
+    # 미국장 프리마켓~애프터마켓 (UTC 08:00~01:00 = KST 17:00~10:00, 평일) 30분마다
+    - cron: "*/30 8-23 * * 1-5"
+    - cron: "*/30 0 * * 2-6"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check / status / test"
+        default: "status"
+        type: choice
+        options: [check, status, test]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tqqq-alert
+  cancel-in-progress: false
+
+jobs:
+  tqqq-alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Code Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install --upgrade yfinance requests
+
+      - name: Run TQQQ alert
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+          ALPACA_KEY: ${{ secrets.ALPACA_KEY }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
+          ALPACA_FEED: ${{ vars.ALPACA_FEED || 'iex' }}
+        run: |
+          MODE="${{ github.event.inputs.mode }}"
+          if [ "$MODE" = "test" ]; then python tqqq_alert.py --test
+          elif [ "$MODE" = "status" ]; then python tqqq_alert.py --status
+          else python tqqq_alert.py; fi
+
+      - name: Save state
+        run: |
+          if ! git diff --quiet tqqq_state.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add tqqq_state.json
+            git commit -m "update tqqq state"
+            git pull --rebase
+            git push
+          fi
