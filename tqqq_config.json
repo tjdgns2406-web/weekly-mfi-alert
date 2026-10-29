@@ -1,0 +1,8 @@
+{
+  "drop1": 0.15,
+  "drop2": 0.35,
+  "tp": 0.60,
+  "split": 0.30,
+  "near_pct": 0.03,
+  "weekly_status": true
+}
