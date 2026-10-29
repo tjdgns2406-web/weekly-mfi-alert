@@ -2,7 +2,9 @@
 TQQQ 낙폭 분할매수 / 익절 텔레그램 알림 봇 (GitHub Actions용)
 
 전략 (config.json 에서 변경)
-  - 사상 최고가 대비 -DROP1 → 1차 매수 (자금의 SPLIT)
+  - 대기 자금은 SGOV에 파킹
+  - 사상 최고가 대비 -DROP1 → SGOV SPLIT 만큼 매도, 신호일(뉴욕) 최저가에 TQQQ 지정가 매수
+    (봇이 신호일 장 마감 후 지정가를 알려 줌. 익절가는 기준가 기준으로 고정)
   - 같은 최고점 대비 -DROP2 → 2차 매수 (남은 자금 전부)
   - 평균단가 대비 +TP → 전량 익절
   - 백테스트(tqqq_split_backtest.py)와 같은 규칙으로 5분봉을 순서대로 처리
@@ -30,6 +32,12 @@ ROOT = Path(__file__).parent
 STATE_FILE = ROOT / "tqqq_state.json"
 CONFIG_FILE = ROOT / "tqqq_config.json"
 KST = timezone(timedelta(hours=9))
+from zoneinfo import ZoneInfo  # noqa: E402
+ET = ZoneInfo("America/New_York")
+
+
+def et_date(t):
+    return t.astimezone(ET).date().isoformat()
 SYMBOL = "TQQQ"
 
 
@@ -153,7 +161,8 @@ def process_bars(state, bars, cfg):
             lvl1 = state["peak"] * (1 - d1)
             if l <= lvl1:
                 state.update(phase="first", px1=min(lvl1, o), entry_peak=state["peak"],
-                             buy1_time=t.isoformat(), px2=None, buy2_time=None, near_flags=[])
+                             buy1_time=t.isoformat(), px2=None, buy2_time=None, near_flags=[],
+                             limit1_day=et_date(t), limit1=l, limit1_final=False, limit1_filled=False)
                 recompute_avg(state, cfg)
                 events.append(("buy1", t, state["px1"], c))
                 bought_this_bar = True
@@ -177,9 +186,10 @@ def process_bars(state, bars, cfg):
                 events.append(("buy2", t, state["px2"], c))
             elif h >= tgt:
                 px = max(tgt, o)
-                events.append(("sell", t, px, c, state["avg"]))
+                events.append(("sell", t, px, c, state["avg"], bool(state.get("limit1_filled"))))
                 state.update(phase="flat", px1=None, px2=None, avg=None, entry_peak=None,
-                             buy1_time=None, buy2_time=None, near_flags=[], last_sell=t.isoformat())
+                             buy1_time=None, buy2_time=None, near_flags=[], last_sell=t.isoformat(),
+                             limit1_day=None, limit1=None, limit1_final=None, limit1_filled=None)
             else:
                 if near and phase == "first" and l <= lvl2 * (1 + near) and "buy2" not in state["near_flags"]:
                     state["near_flags"].append("buy2"); events.append(("near_buy2", t, lvl2, c))
@@ -190,32 +200,68 @@ def process_bars(state, bars, cfg):
                 if "buy2" in state["near_flags"] and l > lvl2 * (1 + 2 * near):
                     state["near_flags"].remove("buy2")
 
+        # ---- 1차 지정가(신호일 최저가) 추적
+        if state["phase"] != "flat" and state.get("limit1_day") and not bought_this_bar:
+            if not state.get("limit1_final"):
+                if et_date(t) == state["limit1_day"]:
+                    state["limit1"] = min(state["limit1"], l)
+                else:
+                    state["limit1_final"] = True
+                    events.append(("limit_set", t, state["limit1"], c))
+            if state.get("limit1_final") and not state.get("limit1_filled") and l <= state["limit1"]:
+                state["limit1_filled"] = True
+                events.append(("limit_fill", t, state["limit1"], c))
+
         state["peak"] = max(state["peak"], h)  # 사상 최고가는 항상 갱신
         state["last_price"], state["last_bar"] = c, t.isoformat()
     return events
 
 
 # ------------------------------------------------------------------ messages
+def next_monday_kst(t):
+    d = t.astimezone(ET).date()
+    mon = d + timedelta(days=7 - d.weekday())
+    return mon.strftime("%m/%d")
+
+
 def msg_event(ev, state, cfg):
     kind, t = ev[0], ev[1]
     s = int(cfg["split"] * 100)
     when = fmt_kst(t)
+    tp = cfg["tp"] * 100
     if kind == "buy1":
         return (f"🟡 <b>TQQQ 1차 매수 신호</b>\n"
-                f"최고점 ${state['entry_peak']:.2f} 대비 -{cfg['drop1']*100:.0f}% 도달\n"
-                f"👉 자금의 <b>{s}%</b> 매수 (기준가 ${ev[2]:.2f}, 현재가 ${ev[3]:.2f})\n"
-                f"다음: 2차 매수 ${state['entry_peak']*(1-cfg['drop2']):.2f} / 익절 ${state['avg']*(1+cfg['tp']):.2f}\n{when}")
+                f"최고점 ${state['entry_peak']:.2f} 대비 -{cfg['drop1']*100:.0f}% 도달 (현재가 ${ev[3]:.2f})\n\n"
+                f"👉 할 일\n"
+                f"① 오늘 <b>SGOV {s}%</b> 매도 (전략 자금의 {s}%)\n"
+                f"② 미국장 마감 후 봇이 알려 주는 <b>오늘 최저가</b>로 TQQQ 지정가 조건주문\n\n"
+                f"기준가 ${ev[2]:.2f} → 익절 목표 ${state['avg']*(1+cfg['tp']):.2f} (고정)\n"
+                f"2차 매수가 ${state['entry_peak']*(1-cfg['drop2']):.2f}\n{when}")
+    if kind == "limit_set":
+        return (f"📌 <b>TQQQ 1차 지정가 확정</b>\n"
+                f"신호일(뉴욕 {state['limit1_day'][5:].replace('-', '/')}) 최저가 <b>${ev[2]:.2f}</b>\n\n"
+                f"👉 SGOV 판 달러 전부로 TQQQ <b>${ev[2]:.2f} 지정가 매수</b> 조건주문\n"
+                f"(프리·애프터 포함, 체결될 때까지 유지)\n"
+                f"⚠️ 익절 신호 전까지 체결 안 되면 쫓아 사지 말고 취소\n{when}")
+    if kind == "limit_fill":
+        return (f"✅ <b>TQQQ 1차 지정가 도달</b>\n"
+                f"가격이 ${ev[2]:.2f} 에 닿았습니다 (현재가 ${ev[3]:.2f}). 체결됐는지 확인하세요.\n{when}")
     if kind == "buy2":
         return (f"🟠 <b>TQQQ 2차 매수 신호</b>\n"
-                f"최고점 ${state['entry_peak']:.2f} 대비 -{cfg['drop2']*100:.0f}% 도달\n"
-                f"👉 남은 자금 <b>{100-s}%</b> 전부 매수 (기준가 ${ev[2]:.2f}, 현재가 ${ev[3]:.2f})\n"
-                f"평균단가 ${state['avg']:.2f} → 익절 목표 ${state['avg']*(1+cfg['tp']):.2f}\n{when}")
+                f"최고점 ${state['entry_peak']:.2f} 대비 -{cfg['drop2']*100:.0f}% 도달 (현재가 ${ev[3]:.2f})\n\n"
+                f"👉 할 일: <b>SGOV 전량 매도 → TQQQ 바로 매수</b> ({100-s}%)\n\n"
+                f"기준 평균단가 ${state['avg']:.2f} → <b>새 익절 목표 ${state['avg']*(1+cfg['tp']):.2f}</b>\n"
+                f"(익절 지정가 주문이 있다면 이 가격으로 수정)\n{when}")
     if kind == "sell":
+        filled = ev[5] if len(ev) > 5 else True
+        extra = "" if filled else "\n⚠️ 1차 지정가 미체결 → 그 주문은 취소하세요"
         return (f"🟢 <b>TQQQ 전량 익절 신호</b>\n"
-                f"평균단가 ${ev[4]:.2f} 대비 +{cfg['tp']*100:.0f}% 도달\n"
-                f"👉 <b>전량 매도</b> (기준가 ${ev[2]:.2f}, 현재가 ${ev[3]:.2f})\n"
-                f"다음 1차 매수: 최고점 ${state['peak']:.2f} 대비 -{cfg['drop1']*100:.0f}% = ${state['peak']*(1-cfg['drop1']):.2f}\n{when}")
-    labels = {"near_buy1": "1차 매수가", "near_buy2": "2차 매수가", "near_tp": "익절가"}
+                f"기준 평균단가 ${ev[4]:.2f} 대비 +{tp:.0f}% 도달 (현재가 ${ev[3]:.2f})\n\n"
+                f"👉 할 일\n"
+                f"① TQQQ <b>전량 매도</b> (목표가 ${ev[2]:.2f}){extra}\n"
+                f"② 다음 주 월요일({next_monday_kst(t)}) <b>SGOV 전액 매수</b>\n\n"
+                f"다음 1차 신호: 최고점 ${state['peak']:.2f} × {1-cfg['drop1']:.2f} = ${state['peak']*(1-cfg['drop1']):.2f}\n{when}")
+    labels = {"near_buy1": "1차 신호가", "near_buy2": "2차 매수가", "near_tp": "익절가"}
     return (f"🔔 TQQQ {labels[kind]} {cfg['near_pct']*100:.0f}% 이내 접근\n"
             f"목표 ${ev[2]:.2f} / 현재 ${ev[3]:.2f}\n{when}")
 
@@ -228,19 +274,22 @@ def msg_status(state, cfg):
     s = int(cfg["split"] * 100)
     if state["phase"] == "flat":
         b1, b2 = pk * (1 - cfg["drop1"]), pk * (1 - cfg["drop2"])
-        lines += ["상태: 💵 현금 대기",
+        lines += ["상태: 💵 SGOV 파킹 대기",
                   f"1차 매수({s}%): ${b1:.2f} (현재가 대비 {(b1/p-1)*100:+.1f}%)",
                   f"2차 매수({100-s}%): ${b2:.2f} (현재가 대비 {(b2/p-1)*100:+.1f}%)"]
     else:
         tgt = state["avg"] * (1 + cfg["tp"])
         lines.append(f"상태: 📈 보유 중 ({'1차만' if state['phase']=='first' else '1차+2차'})")
-        lines.append(f"1차 ${state['px1']:.2f}" + (f" / 2차 ${state['px2']:.2f}" if state.get("px2") else ""))
-        lines.append(f"평균단가 ${state['avg']:.2f} | 평가 {(p/state['avg']-1)*100:+.1f}%")
+        lines.append(f"기준가 1차 ${state['px1']:.2f}" + (f" / 2차 ${state['px2']:.2f}" if state.get("px2") else ""))
+        if state.get("limit1"):
+            st = ("체결" if state.get("limit1_filled") else "대기 중") if state.get("limit1_final") else "신호일 진행 중"
+            lines.append(f"1차 지정가 ${state['limit1']:.2f} ({st})")
+        lines.append(f"기준 평균단가 ${state['avg']:.2f} | 평가 {(p/state['avg']-1)*100:+.1f}%")
         if state["phase"] == "first":
             b2 = state["entry_peak"] * (1 - cfg["drop2"])
             lines.append(f"2차 매수({100-s}%): ${b2:.2f} (현재가 대비 {(b2/p-1)*100:+.1f}%)")
         lines.append(f"익절 목표: ${tgt:.2f} (현재가 대비 {(tgt/p-1)*100:+.1f}%)")
-    lines.append(f"전략: -{cfg['drop1']*100:.0f}% {s}% / -{cfg['drop2']*100:.0f}% {100-s}% / +{cfg['tp']*100:.0f}% 익절")
+    lines.append(f"전략: -{cfg['drop1']*100:.0f}% {s}%(지정가) / -{cfg['drop2']*100:.0f}% {100-s}% / +{cfg['tp']*100:.0f}% 익절 · 대기자금 SGOV")
     return "\n".join(lines)
 
 
@@ -278,7 +327,32 @@ def main():
                           f"주식 분할/병합일 수 있으니 state.json 의 peak/px 값을 확인해 주세요. (자동 처리 중단)")
             sys.exit(1)
 
-    events = process_bars(state, bars, cfg)
+    events = []
+    # 이전 버전 상태에서 넘어온 경우: 신호일 최저가를 과거 봉으로 다시 계산
+    if state["phase"] != "flat" and not state.get("limit1_day") and state.get("buy1_time"):
+        b1 = parse_ts(state["buy1_time"])
+        day = et_date(b1)
+        hist = fetch_bars(b1 - timedelta(seconds=1))
+        same = [x for x in hist if et_date(x[0]) == day]
+        after = [x for x in hist if et_date(x[0]) > day]
+        if same:
+            state.update(limit1_day=day, limit1=min(x[3] for x in same), limit1_final=False, limit1_filled=False)
+            if after or datetime.now(ET).date().isoformat() > day:
+                state["limit1_final"] = True
+                events.append(("limit_set", now_utc(), state["limit1"], (after or same)[-1][4]))
+                hit = [x for x in after if x[3] <= state["limit1"]]
+                if hit:
+                    state["limit1_filled"] = True
+                    events.append(("limit_fill", hit[0][0], state["limit1"], after[-1][4]))
+
+    events += process_bars(state, bars, cfg)
+
+    # 신호일 장(애프터 20:00 ET)이 끝났으면 다음 날 봉을 기다리지 않고 지정가 확정
+    if (state["phase"] != "flat" and state.get("limit1_day") and not state.get("limit1_final")):
+        n = datetime.now(ET)
+        if n.date().isoformat() > state["limit1_day"] or (n.date().isoformat() == state["limit1_day"] and n.hour >= 20):
+            state["limit1_final"] = True
+            events.append(("limit_set", now_utc(), state["limit1"], state.get("last_price") or state["limit1"]))
     for ev in events:
         send_telegram(msg_event(ev, state, cfg))
 
