@@ -246,7 +246,7 @@ DEFAULT_MFI_PERIOD = 14
 ALT_MFI_PERIOD = 11      # 주봉/월봉 예외 종목만
 DAILY_THRESHOLD = 30
 WEEKLY_THRESHOLD = 30
-MONTHLY_THRESHOLD = 60
+MONTHLY_THRESHOLD = 50
 DATA_PERIOD = "10y"
 SEND_WHEN_EMPTY = True
 # ---------------------------------------------------------------
