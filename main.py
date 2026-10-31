@@ -9,6 +9,7 @@ MFI 3중 조건 스크리너 -> 텔레그램 알림 (하이킨아시 기준)
 - 장중 봉 제외: 시장별 마감 확정 시각 이후의 봉만 사용
 - 메시지 상단에 S&P500 상승/보합/하락 종목 수 표시
 """
+
 import os
 import re
 import sys
@@ -45,14 +46,31 @@ TICKERS = [
     "TSEM", "TT", "TXN", "U", "UBER", "UCO", "UGL", "ULTA", "UNH", "UPST",
     "UTHR", "VEA", "VIG", "VKTX", "VLO", "VOOG", "VRT", "VST", "VYM", "WDC",
     "WM", "WMT", "WULF", "XLC", "XLE", "XLF", "XLK", "XLY", "XOM",
+    # --- 토스증권 추가 (미국) ---
+    "MCO", "ISRG", "TLN", "SYK", "RSG", "OKTA", "WCN", "MDT", "ZBH", "LEN",
+    "ROBT", "POWI",
+    # --- 국내 (dc형 ETF) ---
     "438080.KS", "381170.KS", "494670.KS", "244580.KS", "0082V0.KS",
-    "396500.KS", "411060.KS", "473460.KS", "438100.KS"
+    "396500.KS", "411060.KS", "473460.KS", "438100.KS",
+    # --- 토스증권 추가 (국내) ---
+    "108490.KS", "145020.KS", "007660.KS", "078930.KS", "445290.KS",
+    "238720.KS", "225130.KS", "409820.KS", "000660.KS", "005930.KS",
+    "005380.KS", "066570.KS", "000880.KS", "053610.KS", "034020.KS",
+    "015760.KS", "429000.KS", "489250.KS",
 ]
 
-# 주봉/월봉에서 MFI(11)을 쓰는 종목
+# 코스닥 상장 종목 (야후에서는 .KQ로 조회). 조회 실패하면 .KS <-> .KQ 서로 옮겨보세요
+KOSDAQ_TICKERS = {"108490.KS", "145020.KS", "053610.KS", "007660.KS"}
+
+# 주봉/월봉에서 MFI(11)을 쓰는 종목 (나머지는 14)
 MFI_11_TICKERS = {
+    # 미국
     "VIG", "VYM", "RDVY", "DGRO", "DIVB", "SCHD", "DIVO",
-    "SNDK", "MU", "GEV", "AMD", "VLO", "ABNB"
+    "SNDK", "MU", "GEV", "AMD", "VLO", "ABNB", "MCO", "TLN",
+    # 국내
+    "0082V0.KS", "438080.KS", "494670.KS", "438100.KS", "473460.KS",
+    "411060.KS", "381170.KS", "396500.KS", "000660.KS",
+    "238720.KS", "409820.KS",
 }
 
 # 메시지에 표시할 한글 이름 (없는 종목은 티커만 표시됨)
@@ -81,7 +99,7 @@ NAMES = {
     "DGRO": "iShares 배당성장", "DIS": "디즈니", "DIVB": "iShares 우량배당",
     "DIVO": "아미플렉스 배당옵션인컴", "DVA": "다비타",
     "EEM": "iShares 신흥국", "ELF": "엘프뷰티", "EMR": "에머슨일렉트릭",
-    "ENTG": "엔테그리스", "EWL": "iShares 스위스",
+    "ENTG": "엔테그리스", "ETU": "이더리움2배", "EWL": "iShares 스위스",
     "F": "포드", "FAS": "디렉시온 금융3배", "FCX": "프리포트맥모란",
     "FIS": "피델리티내셔널인포메이션", "FLR": "플루어", "FRO": "프런트라인",
     "GD": "제너럴다이내믹스", "GEV": "GE베르노바", "GLW": "코닝",
@@ -135,7 +153,12 @@ NAMES = {
     "WULF": "테라울프",
     "XLC": "커뮤니케이션 SPDR", "XLE": "에너지 SPDR", "XLF": "금융 SPDR",
     "XLK": "기술 SPDR", "XLY": "경기소비재 SPDR", "XOM": "엑슨모빌",
-    # --- 국내 ETF ---
+    # --- 미국 (토스증권 추가) ---
+    "MCO": "무디스", "ISRG": "인튜이티브서지컬", "TLN": "탈런에너지",
+    "SYK": "스트라이커", "RSG": "리퍼블릭서비스", "OKTA": "옥타",
+    "WCN": "웨이스트커넥션스", "MDT": "메드트로닉", "ZBH": "짐머바이오멧",
+    "LEN": "레너", "ROBT": "나스닥AI로봇", "POWI": "파워인티그레이션",
+    # --- 국내 ETF / 종목 ---
     "438080.KS": "ACE 미국S&P500",
     "381170.KS": "TIGER 미국테크TOP",
     "494670.KS": "TIGER 조선TOP10",
@@ -145,6 +168,24 @@ NAMES = {
     "411060.KS": "ACE KRX금현물",
     "473460.KS": "KODEX 미국서학개미",
     "438100.KS": "ACE 미국나스닥100",
+    "108490.KS": "로보티즈",
+    "145020.KS": "휴젤",
+    "007660.KS": "이수페타시스",
+    "078930.KS": "GS",
+    "445290.KS": "KODEX 로봇액티브",
+    "238720.KS": "일본 니케이225(H)",
+    "225130.KS": "골드선물 레버리지(H)",
+    "409820.KS": "TIGER 나스닥100레버리지",
+    "000660.KS": "SK하이닉스",
+    "005930.KS": "삼성전자",
+    "005380.KS": "현대차",
+    "066570.KS": "LG전자",
+    "000880.KS": "한화",
+    "053610.KS": "프로텍",
+    "034020.KS": "두산에너빌리티",
+    "015760.KS": "한국전력",
+    "429000.KS": "TIGER 배당귀족",
+    "489250.KS": "KODEX 미국배당다우존스",
 }
 
 
@@ -191,8 +232,6 @@ def get_sp500_breadth(now_utc):
                          auto_adjust=False, threads=True, progress=False)["Close"]
         px.index = pd.to_datetime(px.index).tz_localize(None).normalize()
         px = px[px.index < market_cutoff("US", now_utc)]
-        # 야후 데이터가 절반도 안 들어온 날짜는 제외 (일부 누락 대비)
-        px = px.dropna(thresh=int(len(px.columns) * 0.5))
         chg = (px.iloc[-1] - px.iloc[-2]).round(2).dropna()
         up, down = int((chg > 0).sum()), int((chg < 0).sum())
         flat = int((chg == 0).sum())
@@ -214,7 +253,9 @@ SEND_WHEN_EMPTY = True
 
 
 def yf_symbol(t: str) -> str:
-    """BRK.B -> BRK-B (야후 표기)"""
+    """내부 티커 -> 야후 표기. BRK.B -> BRK-B, 코스닥(.KS) -> .KQ"""
+    if t in KOSDAQ_TICKERS:
+        return t.replace(".KS", ".KQ")
     return t.replace(".", "-") if re.fullmatch(r"[A-Z]+\.[A-Z]", t) else t
 
 
